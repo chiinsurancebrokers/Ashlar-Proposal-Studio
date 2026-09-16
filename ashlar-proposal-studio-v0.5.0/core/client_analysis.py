@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 
-from .json_utils import parse_best_json_object
+from .json_utils import parse_best_json_object, parse_json_objects
 from .report_schema import ClientReportValidationError, validate_client_report
 
 
@@ -623,6 +623,7 @@ Core rules:
 - Never infer that an applicant is healthier, less likely to have pre-existing conditions, or less likely to use a benefit because of age alone.
 - For Full Medical Underwriting, the client workflow must include: application + full medical history declaration, insurer underwriting review, review of final applicant-specific underwriting terms, then acceptance/policy activation.
 - Do not invent healthcare-cost scenarios, visit counts, probabilities, or claims-cost assumptions (for example "2-3 visits will exhaust the limit" or "a healthy student is unlikely to reach the annual maximum") unless that statement is explicitly supported by supplied evidence.
+- Keep the report concise enough to fit reliably in one structured response: executive_summary <= 180 words; each plan summary <= 90 words; maximum 4 strengths and 4 considerations per plan; maximum 6 key_differences; each key-difference analysis <= 120 words and client_impact <= 70 words; Ashlar reasoning maximum 5 items; important_considerations maximum 5; next_steps maximum 4.
 
 Return ONLY one valid JSON object with this schema:
 {
@@ -704,6 +705,109 @@ def _fallback_analysis(payload: dict, language: str) -> dict:
 
 
 
+_REPORT_REQUIRED_KEYS = (
+    "report_title",
+    "executive_summary",
+    "plans",
+    "ashlar_assessment",
+    "next_steps",
+    "disclaimer",
+)
+
+
+def _recommended_report_max_tokens(plan_count: int) -> int:
+    """Output budget sized for the number of compared plans.
+
+    v0.5.0 reduced the legacy report budget from 7,000 to 4,500 tokens. Four-plan
+    reports can legitimately exceed that, causing Claude to stop at ``max_tokens``
+    and leaving only nested partial JSON objects parseable. Keep one/two-plan jobs
+    economical while giving larger comparisons enough room to finish cleanly.
+    """
+    if plan_count <= 1:
+        return 5200
+    if plan_count == 2:
+        return 6500
+    if plan_count == 3:
+        return 7800
+    return 9200
+
+
+def _complete_report_object(raw: str) -> dict:
+    """Select only a complete top-level ClientReport-like object.
+
+    A truncated outer JSON document may still contain valid nested plan objects.
+    ``parse_best_json_object`` can otherwise select one of those nested objects and
+    turn a token-limit truncation into a confusing schema error. Here we require
+    every structural top-level key before accepting a candidate.
+    """
+    candidates = parse_json_objects(raw)
+    complete = [obj for obj in candidates if all(k in obj for k in _REPORT_REQUIRED_KEYS)]
+    if not complete:
+        raise ClientReportValidationError(
+            "Model response did not contain one complete client-report JSON object."
+        )
+    return max(
+        complete,
+        key=lambda obj: (
+            sum(1 for k in _REPORT_REQUIRED_KEYS if obj.get(k) not in (None, "", [], {})),
+            len(obj),
+        ),
+    )
+
+
+def _compact_repair_payload(payload: dict) -> dict:
+    """Shrink the repair prompt without removing canonical plan facts."""
+    compact = {
+        "case_reference": payload.get("case_reference"),
+        "client_name": payload.get("client_name"),
+        "client_profile": payload.get("client_profile"),
+        "client_priorities": payload.get("client_priorities"),
+        "client_sex": payload.get("client_sex"),
+        "client_age": payload.get("client_age"),
+        "maternity_relevant": payload.get("maternity_relevant"),
+        "plans": [],
+    }
+    for plan in payload.get("plans") or []:
+        benefits = plan.get("benefits") or {}
+        compact["plans"].append({
+            "provider": plan.get("provider"),
+            "plan_name": plan.get("plan_name"),
+            "premium": plan.get("premium"),
+            "annual_limit": plan.get("annual_limit"),
+            "deductible_or_excess": plan.get("deductible_or_excess"),
+            "area_of_cover": plan.get("area_of_cover"),
+            "underwriting": plan.get("underwriting"),
+            "benefits": benefits,
+            "waiting_periods": (plan.get("waiting_periods") or [])[:12] if isinstance(plan.get("waiting_periods"), list) else plan.get("waiting_periods"),
+            "optional_benefits": (plan.get("optional_benefits") or [])[:10] if isinstance(plan.get("optional_benefits"), list) else plan.get("optional_benefits"),
+            "critical_limitations": (plan.get("critical_limitations") or [])[:10] if isinstance(plan.get("critical_limitations"), list) else plan.get("critical_limitations"),
+            "source_evidence": (plan.get("source_evidence") or [])[:5],
+        })
+    return compact
+
+
+def _response_text(response) -> str:
+    return "".join(
+        block.text for block in response.content
+        if getattr(block, "type", None) == "text"
+    ).strip()
+
+
+def _call_report_model(*, client, model: str, prompt: str, max_tokens: int):
+    """Call Claude and fail explicitly when the response was token-truncated."""
+    response = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = _response_text(response)
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise ClientReportValidationError(
+            f"Client report output reached the {max_tokens}-token limit before completion."
+        )
+    return raw, response
+
+
 def _repair_client_report_with_model(
     *,
     client,
@@ -738,7 +842,7 @@ PARTIAL / WRONG OBJECT RETURNED PREVIOUSLY:
 {json.dumps(partial_report, ensure_ascii=False, indent=2, default=str)[:12000]}
 
 GROUNDED CASE PAYLOAD:
-{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}
+{json.dumps(_compact_repair_payload(payload), ensure_ascii=False, indent=2, default=str)}
 
 Required JSON schema shape:
 {{
@@ -760,23 +864,13 @@ Required JSON schema shape:
   "disclaimer": ""
 }}
 """
-    response = client.messages.create(
+    raw, _response = _call_report_model(
+        client=client,
         model=model,
+        prompt=repair_prompt,
         max_tokens=max_tokens,
-        messages=[{"role": "user", "content": repair_prompt}],
     )
-    raw = "".join(block.text for block in response.content if getattr(block, "type", None) == "text").strip()
-    return parse_best_json_object(
-        raw,
-        required_keys=(
-            "report_title",
-            "executive_summary",
-            "plans",
-            "ashlar_assessment",
-            "next_steps",
-            "disclaimer",
-        ),
-    )
+    return _complete_report_object(raw)
 
 def generate_client_analysis(
     *,
@@ -811,7 +905,7 @@ def generate_client_analysis(
             out, results=results or [], client_sex=client_sex, client_age=client_age, client_priorities=client_priorities, language=language
         )
 
-    model = os.getenv("CLIENT_ANALYSIS_MODEL", os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001"))
+    model = os.getenv("CLIENT_ANALYSIS_MODEL", os.getenv("CLAUDE_MODEL", "claude-sonnet-5"))
     language_instruction = (
         "Write every client-facing field in Greek. Keep provider/product names and standard insurance acronyms as stated in source evidence."
         if language.lower().startswith(("gr", "el")) or "greek" in language.lower()
@@ -826,27 +920,33 @@ LANGUAGE REQUIREMENT:
 {json.dumps(payload, ensure_ascii=False, indent=2, default=str)}
 """
     import anthropic
-    timeout_seconds = float(os.getenv("CLIENT_ANALYSIS_TIMEOUT_SECONDS", "90"))
-    max_tokens = int(os.getenv("CLIENT_ANALYSIS_MAX_TOKENS", "4500"))
+    timeout_seconds = float(os.getenv("CLIENT_ANALYSIS_TIMEOUT_SECONDS", "120"))
+    configured_budget = os.getenv("CLIENT_ANALYSIS_MAX_TOKENS", "").strip()
+    max_tokens = int(configured_budget) if configured_budget else _recommended_report_max_tokens(len(results or []))
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=timeout_seconds)
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        raw = "".join(block.text for block in response.content if getattr(block, "type", None) == "text").strip()
-        out = parse_best_json_object(
-            raw,
-            required_keys=(
-                "report_title",
-                "executive_summary",
-                "plans",
-                "ashlar_assessment",
-                "next_steps",
-                "disclaimer",
-            ),
-        )
+        try:
+            raw, response = _call_report_model(
+                client=client,
+                model=model,
+                prompt=user_prompt,
+                max_tokens=max_tokens,
+            )
+            out = _complete_report_object(raw)
+        except ClientReportValidationError as first_generation_error:
+            # A four-plan report can exceed a small configured output budget. Retry
+            # once with a larger ceiling before invoking schema repair.
+            retry_tokens = max(max_tokens + 2500, _recommended_report_max_tokens(len(results or [])))
+            retry_tokens = min(retry_tokens, 12000)
+            retry_prompt = user_prompt + "\n\nIMPORTANT RETRY: Return the complete JSON object in a concise form. Do not omit any required section or analyzed plan."
+            raw, response = _call_report_model(
+                client=client,
+                model=model,
+                prompt=retry_prompt,
+                max_tokens=retry_tokens,
+            )
+            out = _complete_report_object(raw)
+            max_tokens = retry_tokens
     except (json.JSONDecodeError, anthropic.APIError, anthropic.APIConnectionError) as exc:
         if strict:
             raise ClientReportValidationError(f"Client narrative generation failed: {exc}") from exc
@@ -881,7 +981,7 @@ LANGUAGE REQUIREMENT:
                     language_instruction=language_instruction,
                     partial_report=out,
                     validation_error=first_error,
-                    max_tokens=max_tokens,
+                    max_tokens=max(max_tokens, 9000),
                 )
                 repaired["comparison_matrix"] = payload["comparison_matrix"]
                 repaired["client_name"] = payload["client_name"]

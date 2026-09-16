@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import io
+import re
 from datetime import date
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.util import Inches, Pt
 
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative
@@ -37,7 +38,7 @@ def _labels(language: str) -> dict:
             "plan_review": "ΠΑΡΟΥΣΙΑΣΗ ΠΡΟΓΡΑΜΜΑΤΟΣ", "strengths": "Πλεονεκτήματα", "consider": "Σημεία προσοχής",
             "comparison": "ΣΥΓΚΡΙΤΙΚΗ ΑΠΕΙΚΟΝΙΣΗ", "compare_title": "Πώς συγκρίνονται οι επιλογές", "benefit": "Κάλυψη / όρος",
             "what_matters_sec": "ΟΥΣΙΑΣΤΙΚΕΣ ΔΙΑΦΟΡΕΣ", "diff_title": "Οι διαφορές που έχουν σημασία",
-            "assessment": "ΑΞΙΟΛΟΓΗΣΗ ASHLAR", "preferred": "Προτιμώμενη επιλογή", "alternative": "Εναλλακτική",
+            "assessment": "ΑΞΙΟΛΟΓΗΣΗ ASHLAR", "preferred": "Άποψη Ashlar", "alternative": "Ισχυρή εναλλακτική",
             "before": "ΠΡΙΝ ΠΡΟΧΩΡΗΣΕΤΕ", "important": "Σημαντικές επισημάνσεις", "next": "Επόμενα βήματα",
             "notice": "Σημαντική σημείωση", "footer": "Ανεξάρτητη συγκριτική ανάλυση",
             "final": "Η τελική επιλογή υπόκειται στο underwriting της ασφαλιστικής και στα ισχύοντα συμβατικά έγγραφα.",
@@ -49,7 +50,7 @@ def _labels(language: str) -> dict:
         "area": "AREA", "excess": "EXCESS", "plan_review": "PLAN REVIEW", "strengths": "Strengths",
         "consider": "Points to consider", "comparison": "SIDE-BY-SIDE COMPARISON", "compare_title": "How the options compare",
         "benefit": "Benefit / term", "what_matters_sec": "WHAT MATTERS", "diff_title": "The differences that matter",
-        "assessment": "ASHLAR ASSESSMENT", "preferred": "Preferred fit", "alternative": "Alternative",
+        "assessment": "ASHLAR ASSESSMENT", "preferred": "Ashlar view", "alternative": "Strong alternative",
         "before": "BEFORE YOU PROCEED", "important": "Important considerations", "next": "Next steps",
         "notice": "Important notice", "footer": "Independent comparative analysis",
         "final": "The final choice remains subject to insurer underwriting and the governing policy documents.",
@@ -68,10 +69,14 @@ def _rect(slide, x, y, w, h, fill, radius=False, line=None):
     return shp
 
 
-def _text(slide, text, x, y, w, h, size=16, bold=False, color=INK, align=PP_ALIGN.LEFT, valign=MSO_ANCHOR.TOP):
+def _text(slide, text, x, y, w, h, size=16, bold=False, color=INK, align=PP_ALIGN.LEFT, valign=MSO_ANCHOR.TOP, fit=False):
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = box.text_frame
     tf.clear(); tf.word_wrap = True; tf.vertical_anchor = valign
+    tf.margin_left = Inches(.02); tf.margin_right = Inches(.02)
+    tf.margin_top = Inches(.01); tf.margin_bottom = Inches(.01)
+    if fit:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     p = tf.paragraphs[0]; p.alignment = align
     run = p.add_run(); run.text = str(text or "")
     run.font.name = FONT; run.font.size = Pt(size); run.font.bold = bold; run.font.color.rgb = color
@@ -81,6 +86,7 @@ def _text(slide, text, x, y, w, h, size=16, bold=False, color=INK, align=PP_ALIG
 def _bullets(slide, items, x, y, w, h, size=14, color=INK, bullet_color=None):
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = box.text_frame; tf.clear(); tf.word_wrap = True
+    tf.margin_left = Inches(.02); tf.margin_right = Inches(.02); tf.margin_top = Inches(.01); tf.margin_bottom = Inches(.01)
     for i, item in enumerate(items or []):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.text = str(item); p.level = 0; p.space_after = Pt(6)
@@ -108,6 +114,23 @@ def _compact(value, max_chars=90):
     return s if len(s) <= max_chars else s[: max_chars - 1].rstrip() + "…"
 
 
+def _short_plan_label(provider, plan):
+    """Compact provider/plan labels for assessment cards."""
+    p = str(provider or "").strip()
+    pl = str(plan or "").strip()
+    pk = p.casefold()
+    if "cigna" in pk:
+        p = "Cigna"
+    elif "international medical group" in pk or pk.startswith("img"):
+        p = "IMG"
+    elif "now health" in pk or "starr europe" in pk:
+        p = "Now Health"
+    elif "bupa" in pk:
+        p = "Bupa Global"
+    pl = re.sub(r"\s*\([^)]*\)\s*$", "", pl).strip()
+    return _compact(f"{p} · {pl}".strip(" ·"), 42)
+
+
 def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: str = "English") -> bytes:
     lab = _labels(language)
     prs = Presentation()
@@ -118,10 +141,10 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
     s = prs.slides.add_slide(prs.slide_layouts[6])
     s.background.fill.solid(); s.background.fill.fore_color.rgb = NAVY
     _rect(s, 0, 0, .12, 7.5, GOLD)
-    _text(s, "ASHLAR ASSURANCE", .7, .65, 4, .35, 11, True, GOLD)
-    _text(s, client_analysis.get("report_title") or "Insurance Comparative Analysis", .7, 1.45, 11.7, 1.4, 31, True, WHITE)
-    _text(s, client_analysis.get("client_name") or "Client", .7, 3.15, 10, .55, 20, True, WHITE)
-    _text(s, lab["subtitle"], .7, 3.75, 8.8, .55, 14, False, RGBColor(188, 200, 215))
+    _text(s, "ASHLAR ASSURANCE", .75, .55, 4, .32, 10, True, GOLD)
+    _text(s, client_analysis.get("report_title") or "Insurance Comparative Analysis", .75, 1.18, 11.75, 1.72, 28, True, WHITE, fit=True)
+    _text(s, client_analysis.get("client_name") or "Client", .75, 3.15, 10.5, .5, 18, True, WHITE, fit=True)
+    _text(s, lab["subtitle"], .75, 3.82, 9.3, .5, 12, False, RGBColor(188, 200, 215), fit=True)
     _rect(s, .7, 5.45, 4.15, .65, NAVY2, True, RGBColor(52, 74, 98))
     _text(s, f"{len(results)} {lab["reviewed"]}", .95, 5.61, 3.65, .28, 12, True, WHITE)
     _text(s, date.today().strftime("%d %B %Y"), .7, 6.68, 2.6, .25, 9, False, RGBColor(160, 175, 193))
@@ -209,37 +232,44 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
                 _text(s, _compact((row.get("values") or {}).get(name), 54), x+.09, y+.08, col_w-.18, .52, 8, False)
         _footer(s, lab["footer"])
 
-    # Key differences
+    # Key differences — keep generous internal margins and no more than 3 cards per slide.
     diffs = client_analysis.get("key_differences") or []
     if diffs:
-        s = _base(prs, lab["what_matters_sec"])
-        _text(s, lab["diff_title"], .55, .76, 12, .55, 25, True)
-        y = 1.58
-        for i, d in enumerate(diffs[:4], 1):
-            _rect(s, .55, y, 12.2, 1.14, WHITE, True, BORDER)
-            _text(s, f"{i:02d}", .77, y+.25, .45, .3, 11, True, PURPLE)
-            _text(s, d.get("title") or "Difference", 1.32, y+.17, 3.15, .34, 14, True)
-            _text(s, d.get("analysis") or "", 4.5, y+.13, 5.15, .62, 10, False)
-            _text(s, d.get("client_impact") or "", 9.85, y+.13, 2.55, .68, 9, True, MUTED)
-            y += 1.28
-        _footer(s)
+        for start in range(0, min(len(diffs), 6), 3):
+            subset = diffs[start:start+3]
+            s = _base(prs, lab["what_matters_sec"])
+            _text(s, lab["diff_title"], .62, .82, 11.8, .5, 23, True)
+            y = 1.58
+            for offset, d in enumerate(subset, start + 1):
+                _rect(s, .62, y, 12.0, 1.48, WHITE, True, BORDER)
+                _text(s, f"{offset:02d}", .86, y+.30, .42, .26, 10, True, PURPLE)
+                _text(s, d.get("title") or "Difference", 1.38, y+.20, 3.0, .62, 12.5, True, fit=True)
+                _text(s, d.get("analysis") or "", 4.55, y+.18, 5.0, 1.02, 9.2, False, fit=True)
+                _text(s, d.get("client_impact") or "", 9.78, y+.18, 2.52, 1.02, 8.5, True, MUTED, fit=True)
+                y += 1.68
+            _footer(s)
 
-    # Assessment
+    # Assessment — deliberately spacious; long model prose must never overlap cards.
     ass = client_analysis.get("ashlar_assessment") or {}
     s = prs.slides.add_slide(prs.slide_layouts[6])
     s.background.fill.solid(); s.background.fill.fore_color.rgb = NAVY
-    _text(s, lab["assessment"], .65, .58, 4, .3, 10, True, GOLD)
-    _text(s, ass.get("headline") or "Our view", .65, 1.05, 11.7, .95, 27, True, WHITE)
-    if ass.get("recommended_provider") or ass.get("recommended_plan"):
-        _rect(s, .65, 2.22, 4.1, .75, PURPLE, True)
-        _text(s, f"{lab["preferred"]}: {ass.get('recommended_provider','')} {ass.get('recommended_plan','')}", .9, 2.43, 3.6, .32, 13, True, WHITE)
-    _bullets(s, (ass.get("reasoning") or [])[:5], .65, 3.18, 7.45, 2.55, 14, WHITE)
-    _rect(s, 8.45, 2.22, 4.2, 3.7, NAVY2, True, RGBColor(53,75,98))
-    _text(s, lab["alternative"], 8.75, 2.55, 3.5, .35, 13, True, GOLD)
-    _text(s, f"{ass.get('alternative_provider','')} {ass.get('alternative_plan','')}", 8.75, 3.0, 3.5, .52, 18, True, WHITE)
-    _text(s, ass.get("alternative_reason") or "", 8.75, 3.7, 3.45, 1.1, 11, False, RGBColor(204,214,225))
-    _text(s, ass.get("when_the_alternative_may_be_better") or "", 8.75, 4.92, 3.45, .7, 10, False, RGBColor(173,188,204))
-    _text(s, lab["final"], .65, 6.72, 11.8, .3, 9, False, RGBColor(157,174,193))
+    _text(s, lab["assessment"], .72, .48, 4, .28, 9.5, True, GOLD)
+    _text(s, ass.get("headline") or "Our view", .72, .92, 11.75, 1.15, 23.5, True, WHITE, fit=True)
+    has_rec = bool(ass.get("recommended_provider") or ass.get("recommended_plan"))
+    has_alt = bool(ass.get("alternative_provider") or ass.get("alternative_plan"))
+    if has_rec:
+        _rect(s, .72, 2.28, 4.45, .7, PURPLE, True)
+        _text(s, f"{lab['preferred']}: {_short_plan_label(ass.get('recommended_provider'), ass.get('recommended_plan'))}", .96, 2.48, 3.95, .28, 11.5, True, WHITE, fit=True)
+    else:
+        _text(s, lab["preferred"], .72, 2.34, 2.5, .3, 11, True, GOLD)
+    _bullets(s, (ass.get("reasoning") or [])[:4], .72, 3.18, 7.2 if has_alt else 11.6, 2.65, 11.6, WHITE)
+    if has_alt:
+        _rect(s, 8.28, 2.28, 4.32, 3.82, NAVY2, True, RGBColor(53,75,98))
+        _text(s, lab["alternative"], 8.62, 2.60, 3.55, .28, 11.5, True, GOLD)
+        _text(s, _short_plan_label(ass.get('alternative_provider'), ass.get('alternative_plan')), 8.62, 2.98, 3.55, .72, 15.5, True, WHITE, fit=True)
+        _text(s, ass.get("alternative_reason") or "", 8.62, 3.82, 3.52, 1.02, 9.4, False, RGBColor(204,214,225), fit=True)
+        _text(s, ass.get("when_the_alternative_may_be_better") or "", 8.62, 4.98, 3.52, .78, 8.7, False, RGBColor(173,188,204), fit=True)
+    _text(s, lab["final"], .72, 6.82, 11.7, .26, 8.5, False, RGBColor(157,174,193), fit=True)
 
     # Considerations / next steps
     s = _base(prs, lab["before"])

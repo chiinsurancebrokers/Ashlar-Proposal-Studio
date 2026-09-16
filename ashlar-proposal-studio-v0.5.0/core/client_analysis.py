@@ -204,6 +204,27 @@ def _strip_zero_cost_share_phrases(text: Any) -> str:
     return raw.strip(" ,;")
 
 
+def _neutralise_module_architecture_bias(text: Any) -> str:
+    """Do not let base-plan vs selected-module packaging drive the recommendation.
+
+    Client comparisons should assess the final quoted configuration. Product architecture
+    may still be described factually on plan pages, but it should not be framed as an
+    intrinsic advantage once an optional module is confirmed selected and priced.
+    """
+    raw = str(text or "")
+    replacements = [
+        (r"within (?:its|the) base plan,? without requiring optional modules to reach that scope", "within the quoted configuration"),
+        (r"within (?:its|the) base premium", "within the quoted premium"),
+        (r"included in (?:its|the) base premium,? not an optional add-on", "included in the quoted cover"),
+        (r"without needing optional modules", "within the quoted configuration"),
+        (r"without requiring optional modules", "within the quoted configuration"),
+    ]
+    for pattern, repl in replacements:
+        raw = re.sub(pattern, repl, raw, flags=re.I)
+    raw = re.sub(r"\s{2,}", " ", raw)
+    return raw.strip()
+
+
 def _internal_consideration(text: Any) -> bool:
     """Filter broker-internal housekeeping from a client-facing report."""
     key = str(text or "").casefold()
@@ -397,10 +418,14 @@ def apply_client_report_rules(
         plan["strengths"] = [_strip_age_health_inference(x) for x in (plan.get("strengths") or []) if _strip_age_health_inference(x)]
         plan["considerations"] = [_strip_age_health_inference(x) for x in (plan.get("considerations") or []) if _strip_age_health_inference(x)]
     ass = report.get("ashlar_assessment") or {}
-    ass["headline"] = _strip_age_health_inference(ass.get("headline"))
-    ass["reasoning"] = [_strip_age_health_inference(x) for x in (ass.get("reasoning") or []) if _strip_age_health_inference(x)]
-    ass["alternative_reason"] = _strip_age_health_inference(ass.get("alternative_reason"))
-    ass["when_the_alternative_may_be_better"] = _strip_age_health_inference(ass.get("when_the_alternative_may_be_better"))
+    ass["headline"] = _neutralise_module_architecture_bias(_strip_age_health_inference(ass.get("headline")))
+    ass["reasoning"] = [
+        _neutralise_module_architecture_bias(_strip_age_health_inference(x))
+        for x in (ass.get("reasoning") or [])
+        if _strip_age_health_inference(x)
+    ]
+    ass["alternative_reason"] = _neutralise_module_architecture_bias(_strip_age_health_inference(ass.get("alternative_reason")))
+    ass["when_the_alternative_may_be_better"] = _neutralise_module_architecture_bias(_strip_age_health_inference(ass.get("when_the_alternative_may_be_better")))
 
     # Client-facing considerations: useful policy mechanics only, not internal broker housekeeping.
     considerations = []
@@ -603,7 +628,12 @@ Core rules:
 - If evidence is incomplete or ambiguous, say so clearly and include it under important_considerations.
 - Do not rank plans using an arbitrary numeric AI score.
 - The recommendation must be reasoned from the CLIENT'S stated priorities and the actual material differences.
-- A higher headline annual limit is not automatically "better" if another feature matters more for this client.
+- Compare the FINAL QUOTED CONFIGURATION, not product architecture. Once an optional module is confirmed selected and included in the quoted premium, the fact that another insurer includes the same scope in its base plan is NOT, by itself, a reason to prefer that insurer.
+- Do not reward "base plan simplicity" unless the client explicitly says simplicity/modularity matters. For a generic priority such as strong in-patient and out-patient cover, compare actual scope, annual/sub-limits, meaningful sub-limits, diagnostics, waiting periods, deductible and quoted premium.
+- A higher headline annual limit is not automatically "better" if another feature matters more for this client, but do not dismiss it as secondary unless the client's stated priorities justify doing so.
+- If two plans are materially close but win on different dimensions, do NOT force a single winner. Leave recommended_provider/recommended_plan empty and explain the two leading fits and their trade-off in the headline/reasoning.
+- If you do make a single recommendation, explicitly explain why apparently stronger competing facts (for example lower premium, higher annual limit, higher out-patient limit, or fewer sub-limits) do not outweigh the recommended plan for this specific client.
+- The alternative must be the strongest competing fit for the client's stated needs, not merely the plan with the next-highest out-patient ceiling.
 - Avoid marketing superlatives such as "best policy" or "comprehensive" unless the evidence itself supports the wording.
 - When useful, cite sources in plain text using document/page from the supplied evidence, e.g. "[IMG brochure, p.6]".
 - Keep the tone professional, independent, concise and suitable to send directly to a private client.

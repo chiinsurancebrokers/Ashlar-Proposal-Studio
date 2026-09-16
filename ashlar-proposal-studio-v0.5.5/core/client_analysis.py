@@ -1231,46 +1231,55 @@ def _compact_decision_payload(payload: dict) -> dict:
     return out
 
 
-_SYNTHESIS_REQUIRED_KEYS = (
+_SUMMARY_REQUIRED_KEYS = (
     "executive_summary", "client_needs_summary", "key_differences",
-    "ashlar_assessment", "important_considerations",
+    "important_considerations",
 )
 
 
-def _complete_synthesis_object(raw: str) -> dict:
+def _complete_summary_synthesis_object(raw: str) -> dict:
     candidates = parse_json_objects(raw)
-    complete = [obj for obj in candidates if all(k in obj for k in _SYNTHESIS_REQUIRED_KEYS)]
+    complete = [obj for obj in candidates if all(k in obj for k in _SUMMARY_REQUIRED_KEYS)]
     if not complete:
-        raise ClientReportValidationError("Model response did not contain one complete decision-synthesis JSON object.")
-    return max(complete, key=lambda obj: (sum(bool(obj.get(k)) for k in _SYNTHESIS_REQUIRED_KEYS), len(obj)))
+        raise ClientReportValidationError("Model response did not contain one complete summary-synthesis JSON object.")
+    return max(complete, key=lambda obj: (sum(bool(obj.get(k)) for k in _SUMMARY_REQUIRED_KEYS), len(obj)))
 
 
-MODULAR_SYNTHESIS_PROMPT = """You are the senior advisory-writing engine inside Ashlar Proposal Studio.
-You are NOT writing the whole report. Verified plan pages, comparison matrix, underwriting workflow, next steps and disclaimer are built deterministically elsewhere.
+def _complete_assessment_synthesis_object(raw: str) -> dict:
+    candidates = parse_json_objects(raw)
+    complete = []
+    for obj in candidates:
+        ass = obj.get("ashlar_assessment") if isinstance(obj, dict) else None
+        if not isinstance(ass, dict):
+            continue
+        if str(ass.get("headline") or "").strip() and any(str(x or "").strip() for x in (ass.get("reasoning") or [])):
+            complete.append(obj)
+    if not complete:
+        raise ClientReportValidationError("Model response did not contain one complete Ashlar assessment JSON object.")
+    return max(complete, key=lambda obj: len(obj))
 
-Your task is ONLY to write the compact decision synthesis from the supplied verified case facts:
-1) executive_summary (max 130 words)
-2) client_needs_summary (max 55 words)
-3) up to 4 key_differences; each analysis max 85 words and client_impact max 45 words
-4) ashlar_assessment with max 4 reasoning bullets
-5) up to 5 client-friendly important_considerations
 
-Non-negotiable rules:
+SUMMARY_SYNTHESIS_PROMPT = """You are the senior advisory-writing engine inside Ashlar Proposal Studio.
+You are NOT writing the whole report and you are NOT choosing the final recommendation in this call.
+Verified plan pages, comparison matrix, underwriting workflow, next steps and disclaimer are built deterministically elsewhere.
+
+Write ONLY these compact client-facing sections from the supplied verified case facts:
+1) executive_summary: max 115 words
+2) client_needs_summary: max 45 words
+3) up to 4 key_differences; each analysis max 65 words and client_impact max 35 words
+4) up to 5 client-friendly important_considerations; each max 28 words
+
+Rules:
 - Use ONLY supplied case facts. Do not add product knowledge.
 - Compare the FINAL QUOTED CONFIGURATION. A selected optional module is not inferior merely because another insurer bundles the same benefit in its base plan.
-- Ashlar is acting as the client's broker-adviser, not merely a comparison engine. When the verified facts and stated priorities are sufficient, GIVE ONE CLEAR PRIMARY RECOMMENDATION. Do not hide behind "no single plan wins".
-- Leave recommended_provider/recommended_plan empty only when a material fact needed for the decision is genuinely missing; explain that blocker explicitly.
-- The recommendation must explain why the chosen plan fits THIS client better than the strongest competing option, and must address material competing advantages such as lower premium, higher annual limit, higher outpatient limit, diagnostics, waiting periods or fewer sub-limits.
-- Also identify: (a) the strongest alternative, (b) the broader-extras option when relevant, and (c) the budget option when relevant. These are not rankings; they are practical routes for different priorities.
 - Applicant relevance is mandatory. Maternity/pregnancy/newborn may be discussed only for a female applicant.
 - Do not create a cost-sharing comparison when core quoted cover has no non-zero cost share.
 - MRI/CT/PET belong to diagnostics/imaging, never wellness.
-- Do not imply broker work is incomplete. Important considerations are client usage/benefit issues only.
+- Important considerations are client usage/benefit issues only; never imply broker work is incomplete.
 - Never infer health status from age.
-- Do not invent visit counts, healthcare costs, probabilities or claims assumptions.
-- Treat derived_facts as deterministic truth for premium/annual-limit superlatives. Never contradict them.
-- Never attach a waiting period to a different benefit. A waiting period may be mentioned only for the same benefit/category evidenced in the payload.
-- Keep wording concise enough for client PDF/PPTX cards.
+- Treat derived_facts as deterministic truth for premium/annual-limit superlatives.
+- Never attach a waiting period to a different benefit.
+- Be concise enough for PDF/PPTX cards.
 
 Return ONLY this JSON shape:
 {
@@ -1279,6 +1288,31 @@ Return ONLY this JSON shape:
   "key_differences": [
     {"title": "", "analysis": "", "client_impact": ""}
   ],
+  "important_considerations": [""]
+}
+"""
+
+
+ASSESSMENT_SYNTHESIS_PROMPT = """You are the senior broker-adviser inside Ashlar Proposal Studio.
+Your ONLY task is to produce the final Ashlar recommendation from the verified case facts and the already-written compact comparison summary.
+
+Ashlar must give practical direction to the client. When the verified facts and stated priorities are sufficient, GIVE ONE CLEAR PRIMARY RECOMMENDATION.
+Do not hide behind 'no single plan wins'.
+
+Rules:
+- Use ONLY the supplied verified facts and summary.
+- Compare the FINAL QUOTED CONFIGURATION, not base-vs-optional packaging.
+- Explain why the recommended option fits THIS client better than the strongest competitor.
+- Explicitly acknowledge material competing advantages such as lower premium, higher annual limit, higher outpatient ceiling, diagnostics, waiting periods or fewer sub-limits.
+- Identify a strongest alternative when one exists.
+- Also identify a broader-extras option and a budget option when relevant; these are practical routes, not rankings.
+- Leave recommended_provider/recommended_plan empty only if a material fact needed for the decision is genuinely missing.
+- Never contradict derived_facts.
+- Never attach a waiting period to another benefit.
+- Max 4 reasoning bullets; each max 42 words. Keep all reason fields concise.
+
+Return ONLY this JSON shape:
+{
   "ashlar_assessment": {
     "recommended_provider": "",
     "recommended_plan": "",
@@ -1294,11 +1328,13 @@ Return ONLY this JSON shape:
     "budget_provider": "",
     "budget_plan": "",
     "budget_reason": ""
-  },
-  "important_considerations": [""]
+  }
 }
 """
 
+
+# Backward-compatible combined prompt constant used by regression tests and docs.
+MODULAR_SYNTHESIS_PROMPT = SUMMARY_SYNTHESIS_PROMPT + "\n\n" + ASSESSMENT_SYNTHESIS_PROMPT
 
 def _deterministic_title(payload: dict, *, language: str) -> str:
     name = str(payload.get("client_name") or payload.get("case_reference") or "Client").strip()
@@ -1395,47 +1431,81 @@ def generate_client_analysis(
         else "Write every client-facing field in professional English."
     )
     decision_payload = _compact_decision_payload(payload)
-    prompt = f"""{MODULAR_SYNTHESIS_PROMPT}\nLANGUAGE REQUIREMENT:\n{language_instruction}\n\nVERIFIED DECISION PAYLOAD:\n{json.dumps(decision_payload, ensure_ascii=False, indent=2, default=str)}"""
-
     import anthropic
     timeout_seconds = float(os.getenv("CLIENT_ANALYSIS_TIMEOUT_SECONDS", "120"))
-    configured_budget = os.getenv("CLIENT_ANALYSIS_MAX_TOKENS", "").strip()
-    # A modular synthesis should fit comfortably below this ceiling. A legacy env var
-    # may be larger; cap it to prevent another 10k-token monolithic response.
-    max_tokens = int(configured_budget) if configured_budget else 3600
-    max_tokens = min(max(max_tokens, 2600), 4800)
+
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=timeout_seconds)
+
+        # v0.5.6: split the narrative work into two small calls. This avoids a
+        # single synthesis JSON growing until it hits the model output ceiling.
+        summary_prompt = (
+            f"{SUMMARY_SYNTHESIS_PROMPT}\nLANGUAGE REQUIREMENT:\n{language_instruction}"
+            f"\n\nVERIFIED DECISION PAYLOAD:\n{json.dumps(decision_payload, ensure_ascii=False, indent=2, default=str)}"
+        )
         try:
             response = client.messages.create(
                 model=model,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2600,
+                messages=[{"role": "user", "content": summary_prompt}],
             )
-            raw = _response_text(response)
+            raw_summary = _response_text(response)
             if getattr(response, "stop_reason", None) == "max_tokens":
-                raise ClientReportValidationError(
-                    f"Decision synthesis reached the {max_tokens}-token limit before completion."
-                )
-            synthesis = _complete_synthesis_object(raw)
+                raise ClientReportValidationError("Summary synthesis reached its output limit before completion.")
+            summary_synthesis = _complete_summary_synthesis_object(raw_summary)
         except ClientReportValidationError:
-            retry_prompt = prompt + "\n\nRETRY: Be substantially more concise. Return the complete JSON object only; maximum 4 key differences and 4 assessment bullets."
             response = client.messages.create(
                 model=model,
-                max_tokens=4800,
-                messages=[{"role": "user", "content": retry_prompt}],
+                max_tokens=3200,
+                messages=[{"role": "user", "content": summary_prompt + "\n\nRETRY: Use materially shorter wording and return the complete JSON object only."}],
             )
-            raw = _response_text(response)
+            raw_summary = _response_text(response)
             if getattr(response, "stop_reason", None) == "max_tokens":
-                raise ClientReportValidationError("Decision synthesis was still incomplete after one concise retry.")
-            synthesis = _complete_synthesis_object(raw)
+                raise ClientReportValidationError("Summary synthesis was still incomplete after one concise retry.")
+            summary_synthesis = _complete_summary_synthesis_object(raw_summary)
+
+        assessment_context = {
+            "verified_case": decision_payload,
+            "comparison_summary": {
+                "executive_summary": summary_synthesis.get("executive_summary"),
+                "client_needs_summary": summary_synthesis.get("client_needs_summary"),
+                "key_differences": summary_synthesis.get("key_differences"),
+            },
+        }
+        assessment_prompt = (
+            f"{ASSESSMENT_SYNTHESIS_PROMPT}\nLANGUAGE REQUIREMENT:\n{language_instruction}"
+            f"\n\nDECISION CONTEXT:\n{json.dumps(assessment_context, ensure_ascii=False, indent=2, default=str)}"
+        )
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=1800,
+                messages=[{"role": "user", "content": assessment_prompt}],
+            )
+            raw_assessment = _response_text(response)
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                raise ClientReportValidationError("Ashlar assessment reached its output limit before completion.")
+            assessment_synthesis = _complete_assessment_synthesis_object(raw_assessment)
+        except ClientReportValidationError:
+            response = client.messages.create(
+                model=model,
+                max_tokens=2400,
+                messages=[{"role": "user", "content": assessment_prompt + "\n\nRETRY: Return only the compact ashlar_assessment JSON. Keep every reason to one or two sentences."}],
+            )
+            raw_assessment = _response_text(response)
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                raise ClientReportValidationError("Ashlar assessment was still incomplete after one concise retry.")
+            assessment_synthesis = _complete_assessment_synthesis_object(raw_assessment)
+
+        synthesis = dict(summary_synthesis)
+        synthesis["ashlar_assessment"] = assessment_synthesis.get("ashlar_assessment") or {}
         out = _assemble_modular_report(payload=payload, synthesis=synthesis, language=language)
     except (json.JSONDecodeError, anthropic.APIError, anthropic.APIConnectionError) as exc:
         if strict:
             raise ClientReportValidationError(f"Client decision synthesis failed: {exc}") from exc
         out = _fallback_analysis(payload, language)
         out["generation_warning"] = f"Client decision synthesis failed: {exc}"
-        out["raw_response_excerpt"] = locals().get("raw", "")[:1800]
+        out["raw_response_excerpt"] = (locals().get("raw_assessment") or locals().get("raw_summary") or "")[:1800]
 
     out["comparison_matrix"] = payload["comparison_matrix"]
     out["client_name"] = payload["client_name"]

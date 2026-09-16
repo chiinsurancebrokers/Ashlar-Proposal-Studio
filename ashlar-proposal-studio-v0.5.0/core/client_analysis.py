@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 
-from .json_utils import parse_first_json_object
+from .json_utils import parse_best_json_object
 from .report_schema import ClientReportValidationError, validate_client_report
 
 
@@ -703,6 +703,81 @@ def _fallback_analysis(payload: dict, language: str) -> dict:
     }
 
 
+
+def _repair_client_report_with_model(
+    *,
+    client,
+    model: str,
+    payload: dict,
+    language_instruction: str,
+    partial_report: dict,
+    validation_error: Exception,
+    max_tokens: int,
+) -> dict:
+    """Ask the model once to repair an incomplete report into the exact schema.
+
+    The worker keeps the previous validated report until this repaired object passes
+    Pydantic validation, so a failed repair can never replace good client output.
+    """
+    repair_prompt = f"""You previously returned an incomplete JSON object for an Ashlar client report.
+Repair it now. Return ONLY one complete JSON object and nothing else.
+
+{language_instruction}
+
+The object MUST contain ALL of these top-level keys exactly:
+report_title, executive_summary, client_needs_summary, plans, key_differences,
+ashlar_assessment, important_considerations, next_steps, disclaimer.
+
+Every analyzed plan in GROUNDED CASE PAYLOAD must appear exactly once in plans.
+Do not invent facts. Use only the supplied grounded payload.
+
+VALIDATION ERROR TO FIX:
+{str(validation_error)}
+
+PARTIAL / WRONG OBJECT RETURNED PREVIOUSLY:
+{json.dumps(partial_report, ensure_ascii=False, indent=2, default=str)[:12000]}
+
+GROUNDED CASE PAYLOAD:
+{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}
+
+Required JSON schema shape:
+{{
+  "report_title": "",
+  "executive_summary": "",
+  "client_needs_summary": "",
+  "plans": [{{
+    "provider": "", "plan_name": "", "positioning": "", "summary": "",
+    "strengths": [], "considerations": [], "best_suited_when": "", "source_notes": []
+  }}],
+  "key_differences": [{{"title": "", "analysis": "", "client_impact": ""}}],
+  "ashlar_assessment": {{
+    "recommended_provider": "", "recommended_plan": "", "headline": "",
+    "reasoning": [], "alternative_provider": "", "alternative_plan": "",
+    "alternative_reason": "", "when_the_alternative_may_be_better": ""
+  }},
+  "important_considerations": [],
+  "next_steps": [],
+  "disclaimer": ""
+}}
+"""
+    response = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": repair_prompt}],
+    )
+    raw = "".join(block.text for block in response.content if getattr(block, "type", None) == "text").strip()
+    return parse_best_json_object(
+        raw,
+        required_keys=(
+            "report_title",
+            "executive_summary",
+            "plans",
+            "ashlar_assessment",
+            "next_steps",
+            "disclaimer",
+        ),
+    )
+
 def generate_client_analysis(
     *,
     case_reference: str,
@@ -761,7 +836,17 @@ LANGUAGE REQUIREMENT:
             messages=[{"role": "user", "content": user_prompt}],
         )
         raw = "".join(block.text for block in response.content if getattr(block, "type", None) == "text").strip()
-        out = parse_first_json_object(raw)
+        out = parse_best_json_object(
+            raw,
+            required_keys=(
+                "report_title",
+                "executive_summary",
+                "plans",
+                "ashlar_assessment",
+                "next_steps",
+                "disclaimer",
+            ),
+        )
     except (json.JSONDecodeError, anthropic.APIError, anthropic.APIConnectionError) as exc:
         if strict:
             raise ClientReportValidationError(f"Client narrative generation failed: {exc}") from exc
@@ -783,5 +868,39 @@ LANGUAGE REQUIREMENT:
         language=language,
     )
     if strict:
-        validate_client_report(out, results or [])
+        try:
+            validate_client_report(out, results or [])
+        except ClientReportValidationError as first_error:
+            # One automatic repair attempt. This specifically handles cases where the
+            # model emitted a valid but partial/wrong JSON object.
+            try:
+                repaired = _repair_client_report_with_model(
+                    client=client,
+                    model=model,
+                    payload=payload,
+                    language_instruction=language_instruction,
+                    partial_report=out,
+                    validation_error=first_error,
+                    max_tokens=max_tokens,
+                )
+                repaired["comparison_matrix"] = payload["comparison_matrix"]
+                repaired["client_name"] = payload["client_name"]
+                repaired["case_reference"] = payload["case_reference"]
+                repaired["client_profile"] = payload["client_profile"]
+                repaired["client_priorities"] = payload["client_priorities"]
+                repaired = apply_client_report_rules(
+                    repaired,
+                    results=results or [],
+                    client_sex=client_sex,
+                    client_age=client_age,
+                    client_priorities=client_priorities,
+                    language=language,
+                )
+                validate_client_report(repaired, results or [])
+                out = repaired
+            except Exception as repair_error:
+                raise ClientReportValidationError(
+                    "The client report returned an incomplete structure after an automatic retry. "
+                    "The previous validated report has been preserved. Please generate the report again."
+                ) from repair_error
     return out

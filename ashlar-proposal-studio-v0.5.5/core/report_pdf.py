@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 from datetime import date
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape, quoteattr
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -42,6 +43,7 @@ def _labels(language: str) -> dict:
             "benefit": "Κάλυψη / όρος", "diff": "Κύριες διαφορές", "assessment": "Πρόταση Ashlar", "our_view": "Η πρότασή μας",
             "preferred": "Προτεινόμενη επιλογή", "alternative": "Ισχυρή εναλλακτική", "extras": "Επιλογή με ευρύτερα πρόσθετα", "budget": "Οικονομικότερη επιλογή", "important_next": "Σημαντικές επισημάνσεις & επόμενα βήματα",
             "important": "Σημαντικές επισημάνσεις", "next": "Επόμενα βήματα", "notice": "Σημαντική σημείωση",
+            "sources": "Επίσημα έγγραφα ασφαλιστικών εταιρειών", "sources_note": "Τα παρακάτω brochures / Tables of Benefits είναι τα έγγραφα των ασφαλιστικών εταιρειών που συνοδεύουν την ανάλυση. Οι προσωρινοί σύνδεσμοι ενδέχεται να λήξουν.", "open_doc": "Άνοιγμα εγγράφου",
         }
     return {
         "subtitle": "Independent plan comparison and reasoned advisory view", "footer": "Independent comparative analysis",
@@ -50,6 +52,7 @@ def _labels(language: str) -> dict:
         "benefit": "Benefit / term", "diff": "Key differences", "assessment": "Ashlar Recommendation", "our_view": "Our recommendation",
         "preferred": "Recommended option", "alternative": "Strong alternative", "extras": "Broader extras option", "budget": "Budget option", "important_next": "Important considerations & next steps",
         "important": "Important considerations", "next": "Next steps", "notice": "Important notice",
+        "sources": "Official provider documents", "sources_note": "The brochures / Tables of Benefits below are the insurer documents supplied with this analysis. Temporary web links may expire.", "open_doc": "Open document",
     }
 
 
@@ -80,7 +83,7 @@ def _p(text, style):
     return Paragraph(str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), style)
 
 
-def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str = "English") -> bytes:
+def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str = "English", source_documents: list[dict] | None = None) -> bytes:
     lab = _labels(language)
     buf = io.BytesIO()
     page = landscape(A4)
@@ -214,6 +217,31 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     for item in client_analysis.get("next_steps") or []:
         story += [_p("• " + str(item), Bullet)]
     story += [Spacer(1, 5*mm), _p(lab["notice"], H2), _p(client_analysis.get("disclaimer") or "", Small)]
+
+    source_documents = source_documents or []
+    if source_documents:
+        story += [PageBreak(), _p(lab["sources"], H1), _p(lab["sources_note"], Small), Spacer(1, 3*mm)]
+        grouped: dict[str, list[dict]] = {}
+        for src in source_documents:
+            provider = str(src.get("provider") or "Provider")
+            grouped.setdefault(provider, []).append(src)
+        for provider, docs_for_provider in grouped.items():
+            story += [_p(provider, H2)]
+            for src in docs_for_provider:
+                filename = str(src.get("filename") or "Provider document")
+                doc_type = str(src.get("doc_type") or "document").replace("_", " ").title()
+                plan_name = str(src.get("plan_name") or "").strip()
+                prefix = f"{doc_type} - {plan_name}" if plan_name else doc_type
+                url = str(src.get("url") or "").strip()
+                if url:
+                    link_markup = (
+                        f"<b>{xml_escape(prefix)}</b>: {xml_escape(filename)} "
+                        f"- <link href={quoteattr(url)} color='#6C4CF5'>{xml_escape(lab['open_doc'])}</link>"
+                    )
+                    story += [Paragraph(link_markup, Body)]
+                else:
+                    story += [_p(f"{prefix}: {filename} (supplied separately in the client pack)", Body)]
+            story += [Spacer(1, 2*mm)]
 
     doc.build(story)
     return buf.getvalue()

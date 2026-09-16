@@ -40,7 +40,7 @@ def _labels(language: str) -> dict:
             "exec": "Συνοπτική εικόνα", "strengths": "Πλεονεκτήματα", "consider": "Σημεία προσοχής",
             "compare": "Συγκριτικός πίνακας", "compare_note": "Ο πίνακας παρουσιάζει συνοπτικά τους όρους που εξήχθησαν από τα διαθέσιμα έγγραφα. Τα συμβατικά έγγραφα παραμένουν δεσμευτικά.",
             "benefit": "Κάλυψη / όρος", "diff": "Κύριες διαφορές", "assessment": "Αξιολόγηση Ashlar", "our_view": "Η άποψή μας",
-            "preferred": "Προτιμώμενη επιλογή", "alternative": "Εναλλακτική", "important_next": "Σημαντικές επισημάνσεις & επόμενα βήματα",
+            "preferred": "Άποψη Ashlar", "alternative": "Ισχυρή εναλλακτική", "important_next": "Σημαντικές επισημάνσεις & επόμενα βήματα",
             "important": "Σημαντικές επισημάνσεις", "next": "Επόμενα βήματα", "notice": "Σημαντική σημείωση",
         }
     return {
@@ -48,17 +48,19 @@ def _labels(language: str) -> dict:
         "context": "Client context", "profile": "Profile / context", "exec": "Executive summary", "strengths": "Strengths",
         "consider": "Points to consider", "compare": "Side-by-side comparison", "compare_note": "The table below presents the extracted plan terms side by side. Long policy clauses are intentionally condensed for readability; governing documents remain controlling.",
         "benefit": "Benefit / term", "diff": "Key differences", "assessment": "Ashlar Assessment", "our_view": "Our view",
-        "preferred": "Preferred fit", "alternative": "Alternative", "important_next": "Important considerations & next steps",
+        "preferred": "Ashlar view", "alternative": "Strong alternative", "important_next": "Important considerations & next steps",
         "important": "Important considerations", "next": "Next steps", "notice": "Important notice",
     }
 
 
 def _register_fonts():
     regular_candidates = [
+        "/usr/share/fonts/truetype/lato/Lato-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
     bold_candidates = [
+        "/usr/share/fonts/truetype/lato/Lato-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     ]
@@ -83,8 +85,8 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     buf = io.BytesIO()
     page = landscape(A4)
     doc = BaseDocTemplate(
-        buf, pagesize=page, leftMargin=14*mm, rightMargin=14*mm,
-        topMargin=15*mm, bottomMargin=13*mm,
+        buf, pagesize=page, leftMargin=16*mm, rightMargin=16*mm,
+        topMargin=17*mm, bottomMargin=14*mm,
         title=client_analysis.get("report_title") or "Ashlar Insurance Comparative Analysis",
         author="Ashlar Assurance",
     )
@@ -103,28 +105,29 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
 
     doc.addPageTemplates(PageTemplate(id="main", frames=[frame], onPage=on_page))
     styles = getSampleStyleSheet()
-    H1 = ParagraphStyle("H1", parent=styles["Heading1"], fontName=FONT_BOLD, fontSize=24, leading=29, textColor=INK, spaceAfter=8)
-    H2 = ParagraphStyle("H2", parent=styles["Heading2"], fontName=FONT_BOLD, fontSize=15, leading=19, textColor=INK, spaceBefore=5, spaceAfter=6)
-    Body = ParagraphStyle("Body", parent=styles["BodyText"], fontName=FONT, fontSize=9.5, leading=14, textColor=INK, spaceAfter=5)
-    Small = ParagraphStyle("Small", parent=Body, fontSize=7.5, leading=10, textColor=MUTED)
-    WhiteH = ParagraphStyle("WhiteH", parent=H1, textColor=WHITE, fontSize=29, leading=34)
-    WhiteBody = ParagraphStyle("WhiteBody", parent=Body, textColor=colors.HexColor("#D4DFEA"), fontSize=11, leading=16)
+    H1 = ParagraphStyle("H1", parent=styles["Heading1"], fontName=FONT_BOLD, fontSize=22, leading=27, textColor=INK, spaceAfter=8)
+    H2 = ParagraphStyle("H2", parent=styles["Heading2"], fontName=FONT_BOLD, fontSize=14, leading=18, textColor=INK, spaceBefore=5, spaceAfter=6)
+    Body = ParagraphStyle("Body", parent=styles["BodyText"], fontName=FONT, fontSize=9.2, leading=13.2, textColor=INK, spaceAfter=5)
+    Small = ParagraphStyle("Small", parent=Body, fontSize=7.3, leading=9.6, textColor=MUTED)
+    WhiteH = ParagraphStyle("WhiteH", parent=H1, textColor=WHITE, fontSize=25, leading=29)
+    WhiteBody = ParagraphStyle("WhiteBody", parent=Body, textColor=colors.HexColor("#D4DFEA"), fontSize=10.5, leading=14.5)
     Bullet = ParagraphStyle("Bullet", parent=Body, leftIndent=10, firstLineIndent=-7, bulletIndent=0)
 
     story = []
-    # cover card
+    # Cover card: one-column layout with enough vertical room for 2–3 title lines.
     cover = Table([
-        [_p("ASHLAR ASSURANCE", ParagraphStyle("Eyebrow", parent=Body, fontName=FONT_BOLD, fontSize=9, textColor=GOLD)), ""],
-        [_p(client_analysis.get("report_title") or "Insurance Comparative Analysis", WhiteH), ""],
-        [_p(client_analysis.get("client_name") or "Client", ParagraphStyle("Client", parent=WhiteH, fontSize=18, leading=22)), ""],
-        [_p(lab["subtitle"], WhiteBody), ""],
-    ], colWidths=[230*mm, 20*mm], rowHeights=[12*mm, 27*mm, 13*mm, 20*mm])
+        [_p("ASHLAR ASSURANCE", ParagraphStyle("Eyebrow", parent=Body, fontName=FONT_BOLD, fontSize=8.5, textColor=GOLD))],
+        [_p(client_analysis.get("report_title") or "Insurance Comparative Analysis", WhiteH)],
+        [_p(client_analysis.get("client_name") or "Client", ParagraphStyle("Client", parent=WhiteH, fontSize=16.5, leading=20))],
+        [_p(lab["subtitle"], WhiteBody)],
+    ], colWidths=[doc.width], rowHeights=[10*mm, 42*mm, 12*mm, 17*mm])
     cover.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), NAVY), ("BOX", (0,0), (-1,-1), 0, NAVY),
-        ("LEFTPADDING", (0,0), (-1,-1), 12*mm), ("RIGHTPADDING", (0,0), (-1,-1), 8*mm),
-        ("TOPPADDING", (0,0), (-1,-1), 4*mm),
+        ("LEFTPADDING", (0,0), (-1,-1), 10*mm), ("RIGHTPADDING", (0,0), (-1,-1), 10*mm),
+        ("TOPPADDING", (0,0), (-1,-1), 3*mm), ("BOTTOMPADDING", (0,0), (-1,-1), 2*mm),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
     ]))
-    story += [Spacer(1, 20*mm), cover, PageBreak()]
+    story += [Spacer(1, 10*mm), cover, PageBreak()]
 
     story += [_p(lab["context"], H1), _p(client_analysis.get("client_needs_summary") or client_analysis.get("client_priorities") or "No specific priorities supplied.", Body), Spacer(1, 3*mm)]
     profile = client_analysis.get("client_profile")
@@ -192,7 +195,7 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
         story += [card, Spacer(1, 2.5*mm)]
     story += [PageBreak(), _p(lab["assessment"], H1)]
     ass = client_analysis.get("ashlar_assessment") or {}
-    story += [_p(ass.get("headline") or lab["our_view"], ParagraphStyle("AHead", parent=H2, fontSize=18, leading=23, textColor=PURPLE))]
+    story += [_p(ass.get("headline") or lab["our_view"], ParagraphStyle("AHead", parent=H2, fontSize=16.5, leading=21, textColor=PURPLE))]
     if ass.get("recommended_provider") or ass.get("recommended_plan"):
         story += [_p(f"{lab["preferred"]}: {ass.get('recommended_provider','')} {ass.get('recommended_plan','')}", ParagraphStyle("Rec", parent=H2, textColor=GREEN))]
     for reason in ass.get("reasoning") or []:

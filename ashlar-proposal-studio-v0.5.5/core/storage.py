@@ -495,6 +495,48 @@ def read_document_bytes(doc: LibraryDocument) -> bytes:
     return Path(doc.stored_path).read_bytes()
 
 
+def create_document_signed_url(doc: LibraryDocument, expires_in_seconds: int = 30 * 24 * 60 * 60) -> str | None:
+    """Create a temporary client-safe link for a private Supabase Library document.
+
+    Local development files intentionally return ``None`` because they do not have
+    a stable public URL. The Supabase service-role credential remains server-side;
+    only a time-limited signed object URL is returned to the client report.
+    """
+    if doc.backend != "supabase":
+        return None
+    ttl = max(60, min(int(expires_in_seconds or 0), 90 * 24 * 60 * 60))
+    try:
+        payload = _sb().storage.from_(_supabase_bucket()).create_signed_url(doc.stored_path, ttl)
+    except Exception as exc:
+        raise LibraryStorageError(f"Could not create a signed link for {doc.original_filename}: {exc}") from exc
+
+    if isinstance(payload, str):
+        url = payload
+    elif isinstance(payload, dict):
+        url = (
+            payload.get("signedURL")
+            or payload.get("signedUrl")
+            or payload.get("signed_url")
+            or payload.get("url")
+            or ""
+        )
+    else:
+        url = getattr(payload, "signed_url", None) or getattr(payload, "signedURL", None) or ""
+
+    url = str(url or "").strip()
+    if not url:
+        return None
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    if url.startswith("/storage/v1/"):
+        return f"{_supabase_url()}{url}"
+    if url.startswith("/object/"):
+        return f"{_supabase_url()}/storage/v1{url}"
+    if url.startswith("/"):
+        return f"{_supabase_url()}/storage/v1{url}"
+    return f"{_supabase_url()}/storage/v1/{url.lstrip('/')}"
+
+
 @contextmanager
 def materialize_document(doc: LibraryDocument):
     """Yield a real local Path for parsers that require random-access PDF files."""

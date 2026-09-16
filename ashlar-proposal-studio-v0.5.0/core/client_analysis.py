@@ -902,6 +902,262 @@ Required JSON schema shape:
     )
     return _complete_report_object(raw)
 
+
+
+def _clip_words(value: Any, max_words: int) -> str:
+    """Compact long extracted clauses without changing their substantive wording."""
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return ""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]).rstrip(" ,;:") + "…"
+
+
+def _usable_fact(value: Any) -> bool:
+    text = str(value or "").strip().casefold()
+    return bool(text and text not in {"not specified", "not mentioned", "unclear", "—", "-", "none", "null"})
+
+
+def _plan_narrative_from_verified_facts(plan: dict, *, language: str = "English") -> dict:
+    """Build the plan page from verified structured facts, not another LLM pass.
+
+    v0.5.4 deliberately removes four verbose plan narratives from the report-model
+    output. The report writer already has canonical plan facts; asking the model to
+    rewrite every plan was the main cause of 10k+ token responses.
+    """
+    greek = str(language or "").lower().startswith(("gr", "el")) or "greek" in str(language or "").lower()
+    provider = str(plan.get("provider") or "Provider")
+    plan_name = str(plan.get("plan_name") or "Plan")
+    premium = premium_display(plan)
+    annual = _safe_text(plan.get("annual_limit"))
+    deductible = client_facing_deductible(plan.get("deductible_or_excess"))
+    area = _safe_text(plan.get("area_of_cover"))
+    benefits = plan.get("benefits") or {}
+
+    if greek:
+        positioning = f"{plan_name}: ετήσιο όριο {annual}, με quoted premium {premium}."
+        summary_bits = [
+            f"Περιοχή κάλυψης: {area}.",
+            f"Απαλλαγή/excess: {deductible}.",
+        ]
+        if _usable_fact(benefits.get("inpatient")):
+            summary_bits.append("Νοσοκομειακή κάλυψη: " + _clip_words(benefits.get("inpatient"), 28))
+        if _usable_fact(benefits.get("outpatient")):
+            summary_bits.append("Εξωνοσοκομειακή κάλυψη: " + _clip_words(benefits.get("outpatient"), 30))
+    else:
+        positioning = f"{plan_name}: {annual} annual policy limit with a quoted premium of {premium}."
+        summary_bits = [
+            f"Area of cover: {area}.",
+            f"Deductible/excess: {deductible}.",
+        ]
+        if _usable_fact(benefits.get("inpatient")):
+            summary_bits.append("In-patient: " + _clip_words(benefits.get("inpatient"), 28))
+        if _usable_fact(benefits.get("outpatient")):
+            summary_bits.append("Out-patient: " + _clip_words(benefits.get("outpatient"), 30))
+
+    # Strength bullets are factual positive cover features, not a model-created score.
+    strengths: list[str] = []
+    if _usable_fact(annual):
+        strengths.append(("Ετήσιο όριο συμβολαίου: " if greek else "Annual policy limit: ") + annual)
+    for key, label_en, label_gr in (
+        ("inpatient", "In-patient", "Νοσοκομειακά"),
+        ("outpatient", "Out-patient", "Εξωνοσοκομειακά"),
+        ("diagnostics_imaging", "Diagnostics / imaging", "Διαγνωστικά / απεικονιστικές"),
+        ("evacuation_repatriation", "Evacuation / repatriation", "Αεροδιακομιδή / επαναπατρισμός"),
+    ):
+        value = benefits.get(key)
+        if _usable_fact(value) and not re.search(r"\bnot covered\b|\bexcluded\b", str(value), re.I):
+            strengths.append(f"{label_gr if greek else label_en}: {_clip_words(value, 24)}")
+        if len(strengths) >= 4:
+            break
+
+    considerations: list[str] = []
+    # Prefer explicit critical limitations from extraction.
+    for item in plan.get("critical_limitations") or []:
+        if isinstance(item, dict):
+            detail = item.get("detail") or item.get("topic")
+        else:
+            detail = item
+        if _usable_fact(detail):
+            considerations.append(_clip_words(detail, 28))
+        if len(considerations) >= 4:
+            break
+    # Then add material negative/limited benefits not already represented.
+    if len(considerations) < 4:
+        for key in ("outpatient", "mental_health", "dental", "optical", "preventive", "chronic_conditions"):
+            value = str(benefits.get(key) or "")
+            if not _usable_fact(value):
+                continue
+            if re.search(r"\bnot covered\b|\bexcluded\b|\blimited\b|waiting|\bcap(?:ped)?\b|sub[- ]?limit", value, re.I):
+                bullet = _clip_words(value, 28)
+                if bullet and bullet not in considerations:
+                    considerations.append(bullet)
+            if len(considerations) >= 4:
+                break
+
+    return {
+        "provider": provider,
+        "plan_name": plan_name,
+        "positioning": _clip_words(positioning, 32),
+        "summary": _clip_words(" ".join(summary_bits), 90),
+        "strengths": strengths[:4],
+        "considerations": considerations[:4],
+        "best_suited_when": "",
+        "source_notes": [],
+    }
+
+
+def _compact_decision_payload(payload: dict) -> dict:
+    """Small, decision-focused payload for the only LLM synthesis call."""
+    out = {
+        "case_reference": payload.get("case_reference"),
+        "client_name": payload.get("client_name"),
+        "client_profile": _clip_words(payload.get("client_profile"), 80),
+        "client_priorities": _clip_words(payload.get("client_priorities"), 80),
+        "client_sex": payload.get("client_sex"),
+        "client_age": payload.get("client_age"),
+        "maternity_relevant": payload.get("maternity_relevant"),
+        "plans": [],
+    }
+    for plan in payload.get("plans") or []:
+        benefits = plan.get("benefits") or {}
+        out["plans"].append({
+            "provider": plan.get("provider"),
+            "plan_name": plan.get("plan_name"),
+            "premium": plan.get("premium"),
+            "annual_limit": plan.get("annual_limit"),
+            "deductible_or_excess": client_facing_deductible(plan.get("deductible_or_excess")),
+            "area_of_cover": plan.get("area_of_cover"),
+            "underwriting": plan.get("underwriting"),
+            "benefits": {
+                key: _clip_words(benefits.get(key), 34)
+                for key in (
+                    "inpatient", "outpatient", "cancer", "chronic_conditions",
+                    "mental_health", "dental", "optical", "diagnostics_imaging",
+                    "preventive", "evacuation_repatriation"
+                )
+                if _usable_fact(benefits.get(key))
+            },
+            "waiting_periods": [
+                _clip_words(x.get("detail") if isinstance(x, dict) else x, 22)
+                for x in (plan.get("waiting_periods") or [])[:5]
+            ],
+            "critical_limitations": [
+                _clip_words((x.get("detail") or x.get("topic")) if isinstance(x, dict) else x, 26)
+                for x in (plan.get("critical_limitations") or [])[:5]
+            ],
+        })
+    return out
+
+
+_SYNTHESIS_REQUIRED_KEYS = (
+    "executive_summary", "client_needs_summary", "key_differences",
+    "ashlar_assessment", "important_considerations",
+)
+
+
+def _complete_synthesis_object(raw: str) -> dict:
+    candidates = parse_json_objects(raw)
+    complete = [obj for obj in candidates if all(k in obj for k in _SYNTHESIS_REQUIRED_KEYS)]
+    if not complete:
+        raise ClientReportValidationError("Model response did not contain one complete decision-synthesis JSON object.")
+    return max(complete, key=lambda obj: (sum(bool(obj.get(k)) for k in _SYNTHESIS_REQUIRED_KEYS), len(obj)))
+
+
+MODULAR_SYNTHESIS_PROMPT = """You are the senior advisory-writing engine inside Ashlar Proposal Studio.
+You are NOT writing the whole report. Verified plan pages, comparison matrix, underwriting workflow, next steps and disclaimer are built deterministically elsewhere.
+
+Your task is ONLY to write the compact decision synthesis from the supplied verified case facts:
+1) executive_summary (max 130 words)
+2) client_needs_summary (max 55 words)
+3) up to 4 key_differences; each analysis max 85 words and client_impact max 45 words
+4) ashlar_assessment with max 4 reasoning bullets
+5) up to 5 client-friendly important_considerations
+
+Non-negotiable rules:
+- Use ONLY supplied case facts. Do not add product knowledge.
+- Compare the FINAL QUOTED CONFIGURATION. A selected optional module is not inferior merely because another insurer bundles the same benefit in its base plan.
+- Do not force a winner. If two plans are close but win on different dimensions, leave recommended_provider and recommended_plan empty and explain the trade-off.
+- If recommending one plan, explicitly address material competing advantages such as lower premium, higher annual limit, higher outpatient limit, diagnostics, waiting periods or fewer sub-limits.
+- Applicant relevance is mandatory. Maternity/pregnancy/newborn may be discussed only for a female applicant.
+- Do not create a cost-sharing comparison when core quoted cover has no non-zero cost share.
+- MRI/CT/PET belong to diagnostics/imaging, never wellness.
+- Do not imply broker work is incomplete. Important considerations are client usage/benefit issues only.
+- Never infer health status from age.
+- Do not invent visit counts, healthcare costs, probabilities or claims assumptions.
+- Keep wording concise enough for client PDF/PPTX cards.
+
+Return ONLY this JSON shape:
+{
+  "executive_summary": "",
+  "client_needs_summary": "",
+  "key_differences": [
+    {"title": "", "analysis": "", "client_impact": ""}
+  ],
+  "ashlar_assessment": {
+    "recommended_provider": "",
+    "recommended_plan": "",
+    "headline": "",
+    "reasoning": [""],
+    "alternative_provider": "",
+    "alternative_plan": "",
+    "alternative_reason": "",
+    "when_the_alternative_may_be_better": ""
+  },
+  "important_considerations": [""]
+}
+"""
+
+
+def _deterministic_title(payload: dict, *, language: str) -> str:
+    name = str(payload.get("client_name") or payload.get("case_reference") or "Client").strip()
+    greek = str(language or "").lower().startswith(("gr", "el")) or "greek" in str(language or "").lower()
+    if len(payload.get("plans") or []) <= 1:
+        return f"Ανάλυση Ασφάλισης Υγείας για {name}" if greek else f"Health Insurance Analysis for {name}"
+    return f"Σύγκριση Ασφάλισης Υγείας για {name}" if greek else f"Health Insurance Comparison for {name}"
+
+
+def _deterministic_disclaimer(*, language: str) -> str:
+    greek = str(language or "").lower().startswith(("gr", "el")) or "greek" in str(language or "").lower()
+    if greek:
+        return (
+            "Η παρούσα ανάλυση έχει συνταχθεί για να υποστηρίξει την κατανόηση και σύγκριση των ασφαλιστικών επιλογών. "
+            "Η τελική αποδοχή, οι εξατομικευμένοι όροι, οι εξαιρέσεις, το ασφάλιστρο και η κάλυψη διέπονται από την τελική αξιολόγηση και τα επίσημα έγγραφα της ασφαλιστικής."
+        )
+    return (
+        "This analysis is intended to support understanding and comparison of the insurance options presented. "
+        "Final acceptance, applicant-specific terms, exclusions, premium and cover remain subject to the insurer's final underwriting decision and governing policy documents."
+    )
+
+
+def _assemble_modular_report(*, payload: dict, synthesis: dict, language: str) -> dict:
+    plans = [_plan_narrative_from_verified_facts(p, language=language) for p in payload.get("plans") or []]
+    report = {
+        "report_title": _deterministic_title(payload, language=language),
+        "executive_summary": _clip_words(synthesis.get("executive_summary"), 130),
+        "client_needs_summary": _clip_words(synthesis.get("client_needs_summary"), 55),
+        "plans": plans,
+        "key_differences": [],
+        "ashlar_assessment": synthesis.get("ashlar_assessment") or {},
+        "important_considerations": [
+            _clip_words(x, 34) for x in (synthesis.get("important_considerations") or [])[:5] if str(x or "").strip()
+        ],
+        "next_steps": ["Proceed to the appropriate underwriting workflow."],
+        "disclaimer": _deterministic_disclaimer(language=language),
+    }
+    for item in (synthesis.get("key_differences") or [])[:4]:
+        if not isinstance(item, dict) or not str(item.get("title") or "").strip():
+            continue
+        report["key_differences"].append({
+            "title": _clip_words(item.get("title"), 14),
+            "analysis": _clip_words(item.get("analysis"), 85),
+            "client_impact": _clip_words(item.get("client_impact"), 45),
+        })
+    return report
+
+
 def generate_client_analysis(
     *,
     case_reference: str,
@@ -914,6 +1170,13 @@ def generate_client_analysis(
     language: str = "English",
     strict: bool = False,
 ) -> dict:
+    """v0.5.4 modular report generator.
+
+    Only the concise decision synthesis is generated by the LLM. Plan pages, matrix,
+    underwriting workflow, next steps and disclaimer are assembled from verified case
+    data. This keeps four-plan output well below model output limits.
+    """
+    results = results or []
     payload = build_grounded_case_payload(
         case_reference=case_reference,
         client_name=client_name,
@@ -921,7 +1184,7 @@ def generate_client_analysis(
         client_priorities=client_priorities,
         client_sex=client_sex,
         client_age=client_age,
-        results=results or [],
+        results=results,
     )
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
@@ -932,7 +1195,8 @@ def generate_client_analysis(
         out["client_name"] = payload["client_name"]
         out["case_reference"] = payload["case_reference"]
         return apply_client_report_rules(
-            out, results=results or [], client_sex=client_sex, client_age=client_age, client_priorities=client_priorities, language=language
+            out, results=results, client_sex=client_sex, client_age=client_age,
+            client_priorities=client_priorities, language=language
         )
 
     model = os.getenv("CLIENT_ANALYSIS_MODEL", os.getenv("CLAUDE_MODEL", "claude-sonnet-5"))
@@ -941,47 +1205,47 @@ def generate_client_analysis(
         if language.lower().startswith(("gr", "el")) or "greek" in language.lower()
         else "Write every client-facing field in professional English."
     )
-    user_prompt = f"""{CLIENT_ANALYSIS_PROMPT}
+    decision_payload = _compact_decision_payload(payload)
+    prompt = f"""{MODULAR_SYNTHESIS_PROMPT}\nLANGUAGE REQUIREMENT:\n{language_instruction}\n\nVERIFIED DECISION PAYLOAD:\n{json.dumps(decision_payload, ensure_ascii=False, indent=2, default=str)}"""
 
-LANGUAGE REQUIREMENT:
-{language_instruction}
-
-=== GROUNDED CASE PAYLOAD ===
-{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}
-"""
     import anthropic
     timeout_seconds = float(os.getenv("CLIENT_ANALYSIS_TIMEOUT_SECONDS", "120"))
     configured_budget = os.getenv("CLIENT_ANALYSIS_MAX_TOKENS", "").strip()
-    max_tokens = int(configured_budget) if configured_budget else _recommended_report_max_tokens(len(results or []))
+    # A modular synthesis should fit comfortably below this ceiling. A legacy env var
+    # may be larger; cap it to prevent another 10k-token monolithic response.
+    max_tokens = int(configured_budget) if configured_budget else 3600
+    max_tokens = min(max(max_tokens, 2600), 4800)
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=timeout_seconds)
         try:
-            raw, response = _call_report_model(
-                client=client,
+            response = client.messages.create(
                 model=model,
-                prompt=user_prompt,
                 max_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}],
             )
-            out = _complete_report_object(raw)
-        except ClientReportValidationError as first_generation_error:
-            # A four-plan report can exceed a small configured output budget. Retry
-            # once with a larger ceiling before invoking schema repair.
-            retry_tokens = max(max_tokens + 2500, _recommended_report_max_tokens(len(results or [])))
-            retry_tokens = min(retry_tokens, 12000)
-            retry_prompt = user_prompt + "\n\nIMPORTANT RETRY: Return the complete JSON object in a concise form. Do not omit any required section or analyzed plan."
-            raw, response = _call_report_model(
-                client=client,
+            raw = _response_text(response)
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                raise ClientReportValidationError(
+                    f"Decision synthesis reached the {max_tokens}-token limit before completion."
+                )
+            synthesis = _complete_synthesis_object(raw)
+        except ClientReportValidationError:
+            retry_prompt = prompt + "\n\nRETRY: Be substantially more concise. Return the complete JSON object only; maximum 4 key differences and 4 assessment bullets."
+            response = client.messages.create(
                 model=model,
-                prompt=retry_prompt,
-                max_tokens=retry_tokens,
+                max_tokens=4800,
+                messages=[{"role": "user", "content": retry_prompt}],
             )
-            out = _complete_report_object(raw)
-            max_tokens = retry_tokens
+            raw = _response_text(response)
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                raise ClientReportValidationError("Decision synthesis was still incomplete after one concise retry.")
+            synthesis = _complete_synthesis_object(raw)
+        out = _assemble_modular_report(payload=payload, synthesis=synthesis, language=language)
     except (json.JSONDecodeError, anthropic.APIError, anthropic.APIConnectionError) as exc:
         if strict:
-            raise ClientReportValidationError(f"Client narrative generation failed: {exc}") from exc
+            raise ClientReportValidationError(f"Client decision synthesis failed: {exc}") from exc
         out = _fallback_analysis(payload, language)
-        out["generation_warning"] = f"Client narrative generation failed: {exc}"
+        out["generation_warning"] = f"Client decision synthesis failed: {exc}"
         out["raw_response_excerpt"] = locals().get("raw", "")[:1800]
 
     out["comparison_matrix"] = payload["comparison_matrix"]
@@ -991,46 +1255,12 @@ LANGUAGE REQUIREMENT:
     out["client_priorities"] = payload["client_priorities"]
     out = apply_client_report_rules(
         out,
-        results=results or [],
+        results=results,
         client_sex=client_sex,
         client_age=client_age,
         client_priorities=client_priorities,
         language=language,
     )
     if strict:
-        try:
-            validate_client_report(out, results or [])
-        except ClientReportValidationError as first_error:
-            # One automatic repair attempt. This specifically handles cases where the
-            # model emitted a valid but partial/wrong JSON object.
-            try:
-                repaired = _repair_client_report_with_model(
-                    client=client,
-                    model=model,
-                    payload=payload,
-                    language_instruction=language_instruction,
-                    partial_report=out,
-                    validation_error=first_error,
-                    max_tokens=max(max_tokens, 9000),
-                )
-                repaired["comparison_matrix"] = payload["comparison_matrix"]
-                repaired["client_name"] = payload["client_name"]
-                repaired["case_reference"] = payload["case_reference"]
-                repaired["client_profile"] = payload["client_profile"]
-                repaired["client_priorities"] = payload["client_priorities"]
-                repaired = apply_client_report_rules(
-                    repaired,
-                    results=results or [],
-                    client_sex=client_sex,
-                    client_age=client_age,
-                    client_priorities=client_priorities,
-                    language=language,
-                )
-                validate_client_report(repaired, results or [])
-                out = repaired
-            except Exception as repair_error:
-                raise ClientReportValidationError(
-                    "The client report returned an incomplete structure after an automatic retry. "
-                    "The previous validated report has been preserved. Please generate the report again."
-                ) from repair_error
+        validate_client_report(out, results)
     return out

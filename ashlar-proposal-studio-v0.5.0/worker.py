@@ -43,7 +43,7 @@ def process_report(job: dict) -> None:
     row = load_case(cid)
     results = row.get("results_json") or []
     update_job(jid, progress_stage=f"Preparing verified facts for {len(results)} plan(s)")
-    update_job(jid, progress_stage="Writing client narrative and Ashlar Assessment")
+    update_job(jid, progress_stage="Writing concise decision synthesis and Ashlar Assessment")
     report = generate_client_analysis(
         case_reference=row.get("case_reference") or "",
         client_name=row.get("client_name") or "",

@@ -20,6 +20,8 @@ from core.client_analysis import build_comparison_matrix, generate_client_analys
 from core.report_schema import ClientReportValidationError, validate_client_report
 from core.presentation import build_pptx_bytes
 from core.report_pdf import build_pdf_bytes
+from core.client_pack import collect_client_source_documents, build_client_pack_zip
+from core.email_delivery import EmailDeliveryError, email_delivery_configured, email_delivery_status, send_client_email
 from core.extract import extract_document
 from core.plan_selector import identify_selected_plan
 from core.quality import assess_result_quality, case_quality
@@ -1342,31 +1344,165 @@ def render_client_deliverable(results: list[dict]) -> None:
         language = st.session_state.get("report_language", "English")
         client_name = st.session_state.get("client_name") or st.session_state.get("case_reference") or "Client"
         safe_name = "".join(c if c.isalnum() else "_" for c in client_name).strip("_") or "Client"
+
+        st.markdown("### Client delivery pack")
+        st.caption("Export the Ashlar analysis together with the official provider brochures used for this case.")
+        pack_c1, pack_c2 = st.columns(2)
+        with pack_c1:
+            include_wording = st.checkbox(
+                "Also include policy wording / member guides",
+                value=False,
+                help="Brochures and Tables of Benefits are included by default. Enable this only when you also want to send the longer policy wording/member guides.",
+            )
+        with pack_c2:
+            link_days = st.selectbox(
+                "Temporary brochure-link validity",
+                [7, 30, 60, 90],
+                index=1,
+                help="Only applies when the Provider Library is stored in private Supabase Storage.",
+            )
+
+        source_documents, source_warnings = collect_client_source_documents(
+            results,
+            include_wording=include_wording,
+            link_ttl_seconds=int(link_days) * 24 * 60 * 60,
+        )
+        for warning in source_warnings:
+            st.warning(warning)
+        report_sources = [item.as_report_dict() for item in source_documents]
+
         try:
             pptx_bytes = build_pptx_bytes(client_analysis=report, results=results, language=language)
-            pdf_bytes = build_pdf_bytes(client_analysis=report, results=results, language=language)
-            d1, d2 = st.columns(2)
+            pdf_bytes = build_pdf_bytes(
+                client_analysis=report,
+                results=results,
+                language=language,
+                source_documents=report_sources,
+            )
+            pdf_filename = f"{safe_name}_Ashlar_Insurance_Analysis.pdf"
+            pptx_filename = f"{safe_name}_Ashlar_Insurance_Analysis.pptx"
+            pack_bytes = build_client_pack_zip(
+                report_pdf_bytes=pdf_bytes,
+                report_pdf_filename=pdf_filename,
+                source_documents=source_documents,
+                link_validity_days=int(link_days),
+            )
+
+            d1, d2, d3 = st.columns(3)
             with d1:
                 st.download_button(
-                    "Download Ashlar PPTX",
-                    data=pptx_bytes,
-                    file_name=f"{safe_name}_Ashlar_Insurance_Analysis.pptx",
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "Download Ashlar PDF",
+                    data=pdf_bytes,
+                    file_name=pdf_filename,
+                    mime="application/pdf",
                     use_container_width=True,
                 )
             with d2:
                 st.download_button(
-                    "Download Ashlar PDF",
-                    data=pdf_bytes,
-                    file_name=f"{safe_name}_Ashlar_Insurance_Analysis.pdf",
-                    mime="application/pdf",
+                    "Download Ashlar PPTX",
+                    data=pptx_bytes,
+                    file_name=pptx_filename,
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True,
                 )
-            st.caption("Both files use the same grounded client analysis and comparison matrix.")
+            with d3:
+                st.download_button(
+                    "Download complete Client Pack ZIP",
+                    data=pack_bytes,
+                    file_name=f"{safe_name}_Ashlar_Client_Pack.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    type="primary",
+                )
+            st.caption("The PDF includes an Official Provider Documents page. The ZIP contains the analysis PDF plus the actual provider brochure PDFs.")
+
+            if source_documents:
+                st.markdown("### Provider documents for this case")
+                for idx, item in enumerate(source_documents):
+                    c_name, c_download, c_link = st.columns([3.2, 1.2, 1.2])
+                    with c_name:
+                        st.markdown(f"**{item.provider_label} · {item.plan_name}**")
+                        st.caption(f"{item.document.doc_type.title()} · {item.document.original_filename}")
+                    try:
+                        blob = read_document_bytes(item.document)
+                    except LibraryStorageError as exc:
+                        blob = None
+                        st.warning(f"Could not read {item.document.original_filename}: {exc}")
+                    with c_download:
+                        if blob is not None:
+                            st.download_button(
+                                "Download PDF",
+                                data=blob,
+                                file_name=item.document.original_filename,
+                                mime="application/pdf",
+                                key=f"source_download_{idx}_{item.document.id}",
+                                use_container_width=True,
+                            )
+                    with c_link:
+                        if item.signed_url:
+                            st.link_button(
+                                f"Open link ({link_days}d)",
+                                item.signed_url,
+                                use_container_width=True,
+                            )
+                        else:
+                            st.caption("No public link; included in ZIP")
+            else:
+                st.info("No brochure/Table of Benefits PDFs were found in the Provider Library for the selected case sources.")
+
+            st.markdown("### Send to client")
+            if email_delivery_configured():
+                email_state = email_delivery_status()
+                with st.container(border=True):
+                    st.caption(f"Secure server-side email delivery is configured from {email_state.get('from') or 'Ashlar'}.")
+                    recipient = st.text_input("Recipient email", key="client_delivery_email", placeholder="client@example.com")
+                    subject = st.text_input(
+                        "Email subject",
+                        value=f"Ashlar Assurance - Insurance Analysis for {client_name}",
+                        key="client_delivery_subject",
+                    )
+                    default_body = (
+                        f"Dear Client,\n\nPlease find attached the Ashlar comparative health insurance analysis for {client_name}. "
+                        "The official provider brochures used in the comparison are also supplied below or attached, depending on the selected delivery method.\n\n"
+                        "Please review the analysis and let us know if you would like to discuss the recommended option or any of the alternatives.\n\nKind regards,\nAshlar Assurance"
+                    )
+                    body_text = st.text_area("Email message", value=default_body, height=180, key="client_delivery_body")
+                    delivery_mode = st.radio(
+                        "Provider-document delivery",
+                        ["PDF analysis + secure brochure links", "PDF analysis + brochure PDF attachments"],
+                        horizontal=True,
+                        key="client_delivery_mode",
+                    )
+                    confirmed = st.checkbox(
+                        "I have checked the recipient address and approve sending these client documents.",
+                        key="client_delivery_confirm",
+                    )
+                    if st.button("Send client email", type="primary", disabled=not confirmed, use_container_width=True):
+                        try:
+                            response = send_client_email(
+                                recipient=recipient,
+                                subject=subject,
+                                body_text=body_text,
+                                report_pdf_filename=pdf_filename,
+                                report_pdf_bytes=pdf_bytes,
+                                source_documents=source_documents,
+                                attach_brochures=delivery_mode.endswith("PDF attachments"),
+                            )
+                        except EmailDeliveryError as exc:
+                            st.error(str(exc))
+                        else:
+                            message_id = response.get("id") if isinstance(response, dict) else None
+                            st.success(f"Client email sent successfully{f' · ID {message_id}' if message_id else ''}.")
+            else:
+                st.info(
+                    "Direct email sending is optional. To enable it in Railway, add `RESEND_API_KEY` and `ASHLAR_EMAIL_FROM`. "
+                    "Until then, use the Client Pack ZIP or the secure brochure links above with your normal email client."
+                )
         except Exception as exc:
             st.error(f"Could not build the client files: {exc}")
             with st.expander("Technical diagnostic", expanded=False):
                 st.exception(exc)
+
 
 
 def case_workspace_page() -> None:
@@ -1653,6 +1789,18 @@ def case_workspace_page() -> None:
                     "provider": slot["label"],
                     "library_source": slot["library_row"],
                     "library_files": [d.original_filename for d in library_docs],
+                    "library_documents": [
+                        {
+                            "id": d.id,
+                            "provider": d.provider,
+                            "product": d.product,
+                            "version": d.version,
+                            "doc_type": d.doc_type,
+                            "filename": d.original_filename,
+                            "sha256": d.sha256,
+                        }
+                        for d in library_docs
+                    ],
                     "plan_selection": selection,
                     "target_plan": target_plan,
                     "underwriting_override": slot.get("underwriting_override"),

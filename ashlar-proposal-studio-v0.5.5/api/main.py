@@ -9,7 +9,7 @@ from core.jobs import create_job, get_job, JobQueueError
 from core.storage import get_documents, list_catalog, materialize_document, LibraryStorageError
 from core.brochure_tables import extract_target_plan_from_pdf
 
-app = FastAPI(title="Ashlar Proposal Studio API", version="0.5.0")
+app = FastAPI(title="Ashlar Proposal Studio API", version="0.5.5")
 
 
 def require_internal_key(x_ashlar_api_key: str | None = Header(default=None)) -> None:
@@ -47,7 +47,7 @@ def health():
         }
     except Exception:
         pass
-    return {"status": "ok", "service": "ashlar-api", "version": "0.5.0", "provider_library": library}
+    return {"status": "ok", "service": "ashlar-api", "version": "0.5.5", "provider_library": library}
 
 
 @app.get("/api/v1/library/catalog", dependencies=[Depends(require_internal_key)])

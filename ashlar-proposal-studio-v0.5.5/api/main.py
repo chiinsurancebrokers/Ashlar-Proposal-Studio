@@ -37,7 +37,17 @@ class LibraryPlanRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "ashlar-api", "version": "0.5.0"}
+    library = {"status": "unavailable", "providers": 0, "products": 0}
+    try:
+        catalog = list_catalog()
+        library = {
+            "status": "ok",
+            "providers": len({str(row.get("provider") or "") for row in catalog if row.get("provider")}),
+            "products": len(catalog),
+        }
+    except Exception:
+        pass
+    return {"status": "ok", "service": "ashlar-api", "version": "0.5.0", "provider_library": library}
 
 
 @app.get("/api/v1/library/catalog", dependencies=[Depends(require_internal_key)])

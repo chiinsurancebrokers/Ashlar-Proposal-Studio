@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import httpx
 from pathlib import Path
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -13,30 +14,30 @@ from core.plan_selector import identify_selected_plan
 from core.analyzer import analyze_target_plan
 from core.carriers import get_carrier_adapter
 from core.storage import list_documents, materialize_document, cache_document_text, create_document_signed_url
+from core.hal_benefits import HAL_BENEFIT_ROWS
 
 app = FastAPI(title="Ashlar Proposal Studio API", version="0.5.0")
 
 
-def _supporting_wording_for(provider_label: str, carrier_id: str) -> tuple[str, list[dict]]:
-    """Return cached/extracted wording text and client-safe document metadata.
-
-    Provider Library documents are reusable insurer evidence. Applicant uploads
-    remain case-specific and are never promoted into this library.
-    """
+def _supporting_wording_for(provider_label: str, carrier_id: str) -> tuple[str, str, list[dict]]:
+    """Return contractual wording separately from brochure/supporting evidence."""
     provider_key = (provider_label or carrier_id or "").casefold()
     aliases = {provider_key, carrier_id.casefold()}
     if carrier_id == "bupa":
         aliases.update({"bupa", "bupa global"})
 
-    wording_types = {
+    wording_markers = {
         "policy wording", "policy_wording", "wording", "terms",
-        "terms and conditions", "membership guide", "membership_guide",
-        "guide", "table of benefits", "table_of_benefits",
+        "terms and conditions", "membership guide", "membership_guide", "guide",
+    }
+    supporting_markers = {
+        "table of benefits", "table_of_benefits", "brochure", "sales brochure",
+        "product summary", "benefit summary", "comparison table",
     }
     try:
         docs = list_documents()
     except Exception:
-        return "", []
+        return "", "", []
 
     candidates = []
     for doc in docs:
@@ -47,16 +48,16 @@ def _supporting_wording_for(provider_label: str, carrier_id: str) -> tuple[str, 
         if not any(alias and alias in hay for alias in aliases):
             continue
         dtype = (doc.doc_type or "").strip().casefold()
-        if dtype not in wording_types and not any(k in hay for k in ("membership guide","policy wording","terms and conditions","table of benefits")):
+        if not (dtype in wording_markers or dtype in supporting_markers or
+                any(k in hay for k in wording_markers | supporting_markers)):
             continue
         candidates.append(doc)
 
-    # Latest uploads first. Limit context size and document count so a generic
-    # carrier library cannot swamp the applicant-specific renewal evidence.
     candidates.sort(key=lambda d: (d.uploaded_at or "", d.version or ""), reverse=True)
-    texts: list[str] = []
+    wording_parts: list[str] = []
+    supporting_parts: list[str] = []
     metadata: list[dict] = []
-    for doc in candidates[:4]:
+    for doc in candidates[:6]:
         text_value = (doc.extracted_text or "").strip()
         if not text_value:
             try:
@@ -70,8 +71,14 @@ def _supporting_wording_for(provider_label: str, carrier_id: str) -> tuple[str, 
                         pass
             except Exception:
                 text_value = ""
+
+        dtype = (doc.doc_type or "").strip().casefold()
+        hay = " ".join([dtype, doc.original_filename or "", doc.product or ""]).casefold()
+        is_wording = dtype in wording_markers or any(k in hay for k in wording_markers)
+        bucket = wording_parts if is_wording else supporting_parts
         if text_value:
-            texts.append(f"=== {doc.original_filename} ===\n{text_value[:70000]}")
+            bucket.append(f"=== {doc.original_filename} ===\n{text_value[:70000]}")
+
         try:
             signed = create_document_signed_url(doc, expires_in_seconds=7 * 24 * 60 * 60)
         except Exception:
@@ -84,9 +91,38 @@ def _supporting_wording_for(provider_label: str, carrier_id: str) -> tuple[str, 
             "doc_type": doc.doc_type,
             "filename": doc.original_filename,
             "url": signed,
+            "evidence_role": "policy_wording" if is_wording else "supporting",
         })
-    return "\n\n".join(texts), metadata
 
+    return "\n\n".join(wording_parts), "\n\n".join(supporting_parts), metadata
+
+
+async def _policy_analyzer_enrich(provider_label: str, target_plan: str, quotation_text: str, wording_text: str, supporting_text: str) -> dict:
+    url = os.getenv("POLICY_ANALYZER_API_URL", "").strip()
+    key = os.getenv("POLICY_ANALYZER_API_KEY", "").strip()
+    if not url or not key:
+        return {}
+    payload = {
+        "provider_label": provider_label,
+        "target_plan": target_plan,
+        "quotation_text": quotation_text[:120000],
+        "wording_text": wording_text[:180000],
+        "supporting_text": supporting_text[:120000],
+        "benefit_rows": HAL_BENEFIT_ROWS,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.post(
+                url.rstrip("/") + "/api/v1/analyze",
+                headers={"x-hal-policy-analyzer-key": key},
+                json=payload,
+            )
+        if response.status_code >= 400:
+            return {"bridge_warning": f"Policy Analyzer HTTP {response.status_code}"}
+        body = response.json()
+        return body if isinstance(body, dict) else {}
+    except Exception as exc:
+        return {"bridge_warning": f"Policy Analyzer unavailable: {type(exc).__name__}"}
 
 def require_internal_key(x_ashlar_api_key: str | None = Header(default=None)) -> None:
     expected = os.getenv("ASHLAR_INTERNAL_API_KEY", "").strip()
@@ -182,15 +218,34 @@ async def analyze_current_policy(file: UploadFile = File(...)):
             or "Current policy"
         ).strip()
         provider_label = adapter.display_name if adapter.carrier_id != "generic" else "Current policy"
-        wording_text, supporting_documents = _supporting_wording_for(provider_label, adapter.carrier_id)
+        wording_text, supporting_text, supporting_documents = _supporting_wording_for(provider_label, adapter.carrier_id)
         analysis = analyze_target_plan(
             provider_label=provider_label,
             target_plan=target_plan,
             quotation_text=extracted.text,
-            brochure_text="",
+            brochure_text=supporting_text,
             wording_text=wording_text,
             focused_table_context="",
         )
+        specialist = await _policy_analyzer_enrich(
+            provider_label, target_plan, extracted.text, wording_text, supporting_text
+        )
+        specialist_categories = specialist.get("categories") or {}
+        benefit_map = {
+            "mental_health": "mental_health",
+            "outpatient": "outpatient",
+            "inpatient": "inpatient",
+            "dental": "dental",
+            "maternity": "maternity",
+            "preventive": "preventive",
+        }
+        benefits = analysis.setdefault("benefits", {})
+        for source_key, target_key in benefit_map.items():
+            value = specialist_categories.get(source_key)
+            if value and str(value).strip().casefold() not in {"not mentioned", "not found", "n/a"}:
+                benefits[target_key] = value
+        if specialist.get("critical_limitations"):
+            analysis["critical_limitations"] = specialist["critical_limitations"]
 
         return {
             "filename": filename,
@@ -204,12 +259,15 @@ async def analyze_current_policy(file: UploadFile = File(...)):
             "area_of_cover": analysis.get("area_of_cover"),
             "underwriting": analysis.get("underwriting") or {},
             "benefits": analysis.get("benefits") or {},
+            "benefit_rows": specialist.get("hal_benefit_rows") or [],
+            "policy_analyzer_method": specialist.get("method"),
+            "policy_analyzer_warning": specialist.get("bridge_warning") or "; ".join(specialist.get("bridge_warnings") or []),
             "critical_limitations": analysis.get("critical_limitations") or [],
             "waiting_periods": analysis.get("waiting_periods") or [],
             "source_evidence": analysis.get("source_evidence") or [],
             "confidence": analysis.get("confidence") or "low",
             "supporting_documents": supporting_documents,
-            "policy_wording_status": "attached" if wording_text else "not_attached",
+            "policy_wording_status": "attached" if wording_text else ("supporting_only" if supporting_text else "not_attached"),
         }
     finally:
         if tmp_path:

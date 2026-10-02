@@ -21,6 +21,12 @@ def require_internal_key(x_ashlar_api_key: str | None = Header(default=None)) ->
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
+def require_hal_bridge_key(x_hal_bridge_key: str | None = Header(default=None)) -> None:
+    expected = os.getenv("HAL_BRIDGE_API_KEY", "").strip()
+    if not expected or x_hal_bridge_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid HAL bridge key")
+
+
 class CaseJobRequest(BaseModel):
     case_id: str = Field(min_length=1)
 
@@ -63,7 +69,7 @@ def chat_job(body: ChatJobRequest):
 
 
 
-@app.post("/api/v1/current-policy/analyze", dependencies=[Depends(require_internal_key)])
+@app.post("/api/v1/current-policy/analyze", dependencies=[Depends(require_hal_bridge_key)])
 async def analyze_current_policy(file: UploadFile = File(...)):
     """Analyze one applicant-specific current policy/quote without storing it.
 

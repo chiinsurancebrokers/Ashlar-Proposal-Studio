@@ -93,7 +93,7 @@ def test_current_policy_upload_endpoint_returns_structured_facts(monkeypatch):
     from fastapi.testclient import TestClient
     import api.main as api_main
 
-    monkeypatch.setenv("ASHLAR_INTERNAL_API_KEY", "secret")
+    monkeypatch.setenv("HAL_BRIDGE_API_KEY", "secret")
     monkeypatch.setattr(
         api_main,
         "extract_document",
@@ -119,7 +119,7 @@ def test_current_policy_upload_endpoint_returns_structured_facts(monkeypatch):
     client = TestClient(api_main.app)
     response = client.post(
         "/api/v1/current-policy/analyze",
-        headers={"x-ashlar-api-key": "secret"},
+        headers={"x-hal-bridge-key": "secret"},
         files={"file": ("policy.pdf", b"%PDF fake content", "application/pdf")},
     )
     assert response.status_code == 200
@@ -132,10 +132,10 @@ def test_current_policy_upload_endpoint_returns_structured_facts(monkeypatch):
 def test_current_policy_upload_rejects_unsupported_type(monkeypatch):
     from fastapi.testclient import TestClient
     import api.main as api_main
-    monkeypatch.setenv("ASHLAR_INTERNAL_API_KEY", "secret")
+    monkeypatch.setenv("HAL_BRIDGE_API_KEY", "secret")
     response = TestClient(api_main.app).post(
         "/api/v1/current-policy/analyze",
-        headers={"x-ashlar-api-key": "secret"},
+        headers={"x-hal-bridge-key": "secret"},
         files={"file": ("policy.exe", b"abc", "application/octet-stream")},
     )
     assert response.status_code == 400

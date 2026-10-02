@@ -104,6 +104,14 @@ def test_current_policy_upload_endpoint_returns_structured_facts(monkeypatch):
     )
     monkeypatch.setattr(api_main, "identify_selected_plan", lambda *_a, **_k: {"plan_name": "Current Silver"})
     monkeypatch.setattr(
+        api_main, "_supporting_wording_for",
+        lambda *_a, **_k: ("Official supporting wording text", [{
+            "id": "doc1", "provider": "Current insurer", "product": "Current Silver",
+            "version": "2026", "doc_type": "policy wording",
+            "filename": "wording.pdf", "url": "https://example.test/wording.pdf",
+        }]),
+    )
+    monkeypatch.setattr(
         api_main,
         "analyze_target_plan",
         lambda **_k: {
@@ -127,6 +135,8 @@ def test_current_policy_upload_endpoint_returns_structured_facts(monkeypatch):
     assert body["plan_name"] == "Current Silver"
     assert body["premium"]["amount"] == 2400
     assert body["benefits"]["outpatient"] == "€3,000"
+    assert body["policy_wording_status"] == "attached"
+    assert body["supporting_documents"][0]["doc_type"] == "policy wording"
 
 
 def test_current_policy_upload_rejects_unsupported_type(monkeypatch):
@@ -139,3 +149,30 @@ def test_current_policy_upload_rejects_unsupported_type(monkeypatch):
         files={"file": ("policy.exe", b"abc", "application/octet-stream")},
     )
     assert response.status_code == 400
+
+
+def test_supporting_wording_lookup_prefers_bupa_provider_library(monkeypatch):
+    import api.main as api_main
+
+    class Doc:
+        def __init__(self, provider, product, doc_type, filename, text, uploaded_at):
+            self.id = filename
+            self.provider = provider
+            self.product = product
+            self.version = "2026"
+            self.doc_type = doc_type
+            self.original_filename = filename
+            self.extracted_text = text
+            self.uploaded_at = uploaded_at
+
+    monkeypatch.setattr(api_main, "list_documents", lambda: [
+        Doc("Bupa Global", "Worldwide Health Options", "membership guide", "bupa-guide.pdf", "Bupa benefit wording", "2026-09-01"),
+        Doc("Other", "Other", "policy wording", "other.pdf", "Other wording", "2026-10-01"),
+    ])
+    monkeypatch.setattr(api_main, "create_document_signed_url", lambda doc, expires_in_seconds=0: "https://signed.test/" + doc.original_filename)
+
+    text, docs = api_main._supporting_wording_for("Bupa", "bupa")
+    assert "Bupa benefit wording" in text
+    assert len(docs) == 1
+    assert docs[0]["filename"] == "bupa-guide.pdf"
+    assert docs[0]["url"].endswith("bupa-guide.pdf")

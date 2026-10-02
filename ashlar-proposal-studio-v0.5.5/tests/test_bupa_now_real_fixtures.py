@@ -102,3 +102,55 @@ def test_bupa_renewal_pack_multi_component_extraction():
     assert facts["benefit_hints"]["maternity"].startswith("Covered after 24 months")
     assert facts["pre_existing_conditions"] == "No personal exclusions apply on the renewal certificate."
     assert len(facts["component_premiums"]) == 2
+
+
+def test_bupa_area_of_cover_from_real_certificate_table_layout():
+    text = """
+    Your health plan renewal
+    This is your Insurance Certificate that sets out a summary
+    Name Date of birth Cover start Cover end Area of cover
+    Mrs Maria Kouzeli 05/07/1977 27/09/2026 26/09/2027 Worldwide excluding U.S.
+    Contract Information
+    Plan Annual deductible (EUR) Annual maximum (EUR)
+    EEA Worldwide Medical Insurance 6,250.00 2,125,000.00
+    EEA Worldwide Medical Plus 125.00 31,250.00
+    Renewal invoice
+    Total amount payable (gross) 8,727.32
+    """
+    facts = get_carrier_adapter("Current policy", text).extract_quote_facts(text)
+    assert facts["area_of_cover"] == "Worldwide excluding U.S."
+
+
+def test_analyzer_keeps_deterministic_bupa_facts_without_anthropic_key(monkeypatch):
+    from core.analyzer import analyze_target_plan
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    text = """
+    Bupa Global
+    Your health plan renewal
+    This is your Insurance Certificate
+    Name Date of birth Cover start Cover end Area of cover
+    Mrs Maria Kouzeli 05/07/1977 27/09/2026 26/09/2027 Worldwide excluding U.S.
+    Contract Information
+    Plan Annual deductible (EUR) Annual maximum (EUR)
+    EEA Worldwide Medical Insurance 6,250.00 2,125,000.00
+    EEA Worldwide Medical Plus 125.00 31,250.00
+    Underwriting terms Maternity and childbirth is covered after 24 months' membership
+    No personal exclusions apply
+    Renewal invoice
+    Total amount payable (gross) 8,727.32
+    Annual amount total in EUR 8,727.32 8,727.32
+    Grand total in EUR 8,727.32 8,727.32
+    """
+    result = analyze_target_plan(
+        provider_label="Bupa",
+        target_plan="Bupa Global renewal package",
+        quotation_text=text,
+        brochure_text="",
+        wording_text="",
+        focused_table_context="",
+    )
+    assert result["premium"]["amount"] == "8727.32"
+    assert result["area_of_cover"] == "Worldwide excluding U.S."
+    assert "€6,250.00" in result["deductible_or_excess"]
+    assert "€2,125,000.00" in result["annual_limit"]
+    assert result["confidence"] == "high"

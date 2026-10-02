@@ -403,22 +403,55 @@ def analyze_target_plan(
     wording_text: str,
     focused_table_context: str = "",
 ) -> dict:
+    """Analyze a target plan with deterministic facts as the base layer.
+
+    Carrier-specific quote/certificate extraction is always applied, even when
+    no LLM key is configured. AI is optional enrichment and must never be a
+    prerequisite for headline facts that are explicitly present in the source.
+    """
+    deterministic_base = {
+        "provider": provider_label,
+        "plan_name": target_plan or None,
+        "target_plan_found": bool(target_plan or focused_table_context),
+        "confidence": "low",
+    }
+    deterministic_base = _apply_deterministic_facts(
+        deterministic_base, provider_label, quotation_text, focused_table_context
+    )
+
+    adapter = get_carrier_adapter(provider_label, quotation_text)
+    quote = adapter.extract_quote_facts(quotation_text)
+
+    def _finalize(result: dict) -> dict:
+        result = _apply_deterministic_facts(
+            result, provider_label, quotation_text, focused_table_context
+        )
+        result.setdefault("provider", provider_label)
+        result.setdefault("plan_name", target_plan or quote.get("quoted_plan") or None)
+        result.setdefault("target_plan_found", bool(target_plan or quote.get("quoted_plan") or focused_table_context))
+        if (
+            quote.get("renewal_package")
+            and quote.get("premium")
+            and quote.get("area_of_cover")
+            and quote.get("components")
+        ):
+            result["confidence"] = "high"
+        elif not _needs_repair(result):
+            # Enough material facts are deterministically supported even if
+            # AI enrichment is unavailable.
+            result["confidence"] = result.get("confidence") if result.get("confidence") not in {None, "", "low"} else "medium"
+        else:
+            result.setdefault("confidence", "low")
+        return result
+
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
-        return {
-            "provider": provider_label,
-            "plan_name": target_plan or None,
-            "target_plan_found": bool(focused_table_context),
-            "error": "ANTHROPIC_API_KEY is not configured",
-            "focused_table_context": focused_table_context,
-            "confidence": "low",
-        }
+        deterministic_base["analysis_note"] = "AI enrichment unavailable; deterministic source facts shown."
+        return _finalize(deterministic_base)
 
     model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-    target_lock = target_plan or "NOT YET IDENTIFIED"
+    target_lock = target_plan or quote.get("quoted_plan") or "NOT YET IDENTIFIED"
 
-    # When deterministic target-plan rows exist, keep the generic brochure context
-    # smaller. This reduces model distraction from neighbouring tiers.
     brochure_cap = 35000 if focused_table_context else 90000
     payload = f"""{SCHEMA_PROMPT}
 
@@ -439,22 +472,20 @@ TARGET PLAN: {target_lock}
 {wording_text[:70000] or "Not supplied"}
 """
 
-    import anthropic
-    client = anthropic.Anthropic(api_key=api_key)
-    result, raw, parse_error = _call_model(client, model, payload)
-    if result is None:
-        return {
-            "provider": provider_label,
-            "plan_name": target_plan or None,
-            "target_plan_found": bool(focused_table_context),
-            "error": "AI analysis returned malformed JSON",
-            "error_detail": parse_error,
-            "raw_response_excerpt": raw[:2500],
-            "confidence": "low",
-        }
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        result, raw, parse_error = _call_model(client, model, payload)
+    except Exception as exc:
+        deterministic_base["analysis_note"] = f"AI enrichment unavailable; deterministic source facts shown. ({type(exc).__name__})"
+        return _finalize(deterministic_base)
 
-    # If the first response omitted material fields, run one compact recovery pass
-    # using only the applicant quote + already isolated target-plan evidence.
+    if result is None:
+        deterministic_base["analysis_note"] = "AI analysis returned malformed JSON; deterministic source facts shown."
+        deterministic_base["error_detail"] = parse_error
+        deterministic_base["raw_response_excerpt"] = raw[:2500]
+        return _finalize(deterministic_base)
+
     if _needs_repair(result) and (quotation_text or focused_table_context):
         repair_payload = f"""{SCHEMA_PROMPT}
 
@@ -473,22 +504,12 @@ PROVIDER: {provider_label}
 === SUPPORTING TERMS ===
 {wording_text[:25000] or "Not supplied"}
 """
-        repair, _, _ = _call_model(client, model, repair_payload)
-        if repair:
-            result = _merge_missing(result, repair)
+        try:
+            repair, _, _ = _call_model(client, model, repair_payload)
+            if repair:
+                result = _merge_missing(result, repair)
+        except Exception:
+            pass
 
-    # Deterministic quote/table facts have final authority over model omissions or
-    # conflicting headline values.
-    result = _apply_deterministic_facts(result, provider_label, quotation_text, focused_table_context)
+    return _finalize(result)
 
-    result.setdefault("provider", provider_label)
-    result.setdefault("plan_name", target_plan or None)
-    result.setdefault("target_plan_found", bool(target_plan or focused_table_context))
-    # A multi-component Bupa renewal pack can be high-confidence even when no
-    # single plan tier exists, because the certificate/invoice provide the
-    # headline facts deterministically.
-    if quote.get("renewal_package") and quote.get("premium") and quote.get("area_of_cover") and quote.get("components"):
-        result["confidence"] = "high"
-    else:
-        result.setdefault("confidence", "medium")
-    return result

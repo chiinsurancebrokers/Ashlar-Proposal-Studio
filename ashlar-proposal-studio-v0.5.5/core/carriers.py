@@ -198,11 +198,102 @@ def bupa_quote_facts(text: str) -> dict:
         return facts
     text = _clean_for_matching(text)
 
+    # ------------------------------------------------------------------
+    # Bupa renewal/certificate packs may describe one membership through
+    # multiple policy components (e.g. Worldwide Medical Insurance +
+    # Worldwide Medical Plus). Treat that as one current-policy package,
+    # not as an ambiguous single-plan quote.
+    # ------------------------------------------------------------------
+    renewal_pack = bool(
+        re.search(r"Your\s+health\s+plan\s+renewal", text, flags=re.I)
+        and re.search(r"Renewal\s+invoice", text, flags=re.I)
+        and re.search(r"Insurance\s+Certificate", text, flags=re.I)
+    )
+    if renewal_pack:
+        facts["quoted_plan"] = "Bupa Global renewal package"
+        facts["renewal_package"] = True
+
+        area = re.search(
+            r"Area\s+of\s+cover\s+(?P<area>Worldwide\s+excluding\s+U\.?S\.?|Worldwide\s+including\s+U\.?S\.?|Europe)",
+            text, flags=re.I,
+        )
+        if area:
+            value = re.sub(r"U\.?S\.?", "U.S.", area.group("area"), flags=re.I)
+            facts["area_of_cover"] = value
+
+        total = re.search(
+            r"(?:Grand\s+total\s+in\s+EUR|Annual\s+amount\s+total\s+in\s+EUR|Total\s+amount\s+payable\s*\(gross\))\s+"
+            r"(?P<amt>\d[\d,.]*)",
+            text, flags=re.I,
+        )
+        if total:
+            facts["premium"] = {
+                "amount": total.group("amt").replace(",", ""),
+                "currency": "EUR",
+                "frequency": "Annual",
+            }
+            facts["quote_currency"] = "EUR"
+
+        component_patterns = [
+            ("EEA Worldwide Medical Insurance", r"EEA\s+Worldwide\s+Medical\s+Insurance\s+(?P<ded>\d[\d,.]*)\s+(?P<max>\d[\d,.]*)"),
+            ("EEA Worldwide Medical Plus", r"EEA\s+Worldwide\s+Medical\s+Plus\s+(?P<ded>\d[\d,.]*)\s+(?P<max>\d[\d,.]*)"),
+        ]
+        components = []
+        for name, pattern in component_patterns:
+            m = re.search(pattern, text, flags=re.I)
+            if m:
+                components.append({
+                    "name": name,
+                    "annual_deductible": f"€{m.group('ded')}",
+                    "annual_maximum": f"€{m.group('max')}",
+                })
+        if components:
+            facts["components"] = components
+            facts["deductible_or_excess"] = "; ".join(
+                f"{x['name']}: {x['annual_deductible']}" for x in components
+            )
+            facts["annual_limit"] = "; ".join(
+                f"{x['name']}: {x['annual_maximum']}" for x in components
+            )
+
+        maternity = re.search(
+            r"Maternity\s+and\s+childbirth\s+is\s+covered\s+after\s+(?P<months>\d+)\s+months'?\s+membership",
+            text, flags=re.I,
+        )
+        hints = facts.setdefault("benefit_hints", {})
+        if maternity:
+            months = maternity.group("months")
+            hints["maternity"] = f"Covered after {months} months' membership, according to the renewal certificate."
+            facts["waiting_periods"] = [{
+                "benefit": "Maternity and childbirth",
+                "period": f"{months} months' membership",
+                "source": "Renewal certificate",
+            }]
+
+        if re.search(r"No\s+personal\s+exclusions\s+apply", text, flags=re.I):
+            facts["personal_exclusions"] = "No personal exclusions apply."
+            facts["pre_existing_conditions"] = "No personal exclusions apply on the renewal certificate."
+
+        # Renewal packs often include component premiums on the invoice.
+        component_premiums = []
+        for name in ("EEA Worldwide Medical Insurance", "EEA Worldwide Medical Plus"):
+            m = re.search(
+                rf"{re.escape(name)}\s+(?P<amt>\d[\d,.]*)\s+(?P=amt)",
+                text, flags=re.I,
+            )
+            if m:
+                component_premiums.append({"name": name, "premium": f"€{m.group('amt')}"})
+        if component_premiums:
+            facts["component_premiums"] = component_premiums
+        return facts
+
+    # ------------------------------------------------------------------
+    # Standard Bupa applicant quotation flow.
+    # ------------------------------------------------------------------
     plan = re.search(r"Selected\s+plan\s*:\s*(?P<plan>[A-Za-z][A-Za-z0-9 +\-]{1,40})", text, flags=re.IGNORECASE)
     if plan:
         facts["quoted_plan"] = plan.group("plan").strip().splitlines()[0].strip()
 
-    # Bupa email quotes place the selected plan immediately before the annual premium.
     premium = re.search(
         r"Selected\s+plan\s*:\s*[A-Za-z][A-Za-z0-9 +\-]{1,40}?\s+"
         r"(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)\s+Annually",
@@ -253,7 +344,6 @@ def bupa_quote_facts(text: str) -> dict:
     if "optical" in excluded:
         hints["optical"] = "Not covered on this quotation."
     return facts
-
 
 def now_health_quote_facts(text: str) -> dict:
     facts = generic_quote_facts(text)

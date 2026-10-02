@@ -72,3 +72,33 @@ def test_bupa_and_now_quality_not_blocked_after_deterministic_lock():
         assert 'annual limit' not in q['missing_fields']
         assert 'deductible / excess' not in q['missing_fields']
         assert 'area of cover' not in q['missing_fields']
+
+
+def test_bupa_renewal_pack_multi_component_extraction():
+    text = """
+    Your health plan renewal
+    This is your Insurance Certificate
+    Area of cover Worldwide excluding U.S.
+    Contract Information
+    Plan Annual deductible (EUR) Annual maximum (EUR)
+    EEA Worldwide Medical Insurance 6,250.00 2,125,000.00
+    EEA Worldwide Medical Plus 125.00 31,250.00
+    Underwriting terms Maternity and childbirth is covered after 24 months' membership
+    No personal exclusions apply
+    Renewal invoice
+    Total amount payable (gross) 8,727.32
+    EEA Worldwide Medical Insurance 2,681.64 2,681.64
+    EEA Worldwide Medical Plus 6,045.68 6,045.68
+    Annual amount total in EUR 8,727.32 8,727.32
+    Grand total in EUR 8,727.32 8,727.32
+    """
+    facts = get_carrier_adapter("Current policy", text).extract_quote_facts(text)
+    assert facts["quoted_plan"] == "Bupa Global renewal package"
+    assert facts["premium"] == {"amount": "8727.32", "currency": "EUR", "frequency": "Annual"}
+    assert facts["area_of_cover"] == "Worldwide excluding U.S."
+    assert len(facts["components"]) == 2
+    assert "€6,250.00" in facts["deductible_or_excess"]
+    assert "€2,125,000.00" in facts["annual_limit"]
+    assert facts["benefit_hints"]["maternity"].startswith("Covered after 24 months")
+    assert facts["pre_existing_conditions"] == "No personal exclusions apply on the renewal certificate."
+    assert len(facts["component_premiums"]) == 2

@@ -11,6 +11,7 @@ from core.jobs import create_job, get_job, JobQueueError
 from core.extract import extract_document
 from core.plan_selector import identify_selected_plan
 from core.analyzer import analyze_target_plan
+from core.carriers import get_carrier_adapter
 
 app = FastAPI(title="Ashlar Proposal Studio API", version="0.5.0")
 
@@ -96,14 +97,21 @@ async def analyze_current_policy(file: UploadFile = File(...)):
         if not extracted.ok:
             raise HTTPException(status_code=422, detail=extracted.error)
 
+        adapter = get_carrier_adapter("Current policy", extracted.text)
+        deterministic = adapter.extract_quote_facts(extracted.text)
         selection = identify_selected_plan(
             extracted.text,
-            provider_label="Current policy",
+            provider_label=adapter.display_name if adapter.carrier_id != "generic" else "Current policy",
             manual_override="",
         )
-        target_plan = (selection.get("plan_name") or "Current policy").strip()
+        target_plan = (
+            deterministic.get("quoted_plan")
+            or selection.get("plan_name")
+            or "Current policy"
+        ).strip()
+        provider_label = adapter.display_name if adapter.carrier_id != "generic" else "Current policy"
         analysis = analyze_target_plan(
-            provider_label="Current policy",
+            provider_label=provider_label,
             target_plan=target_plan,
             quotation_text=extracted.text,
             brochure_text="",

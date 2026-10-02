@@ -244,10 +244,25 @@ def _apply_deterministic_facts(result: dict, provider_label: str, quotation_text
         result["area_of_cover"] = quote["area_of_cover"]
     if quote.get("annual_limit"):
         result["annual_limit"] = quote["annual_limit"]
+    if quote.get("components"):
+        result["components"] = quote["components"]
+    if quote.get("component_premiums"):
+        result["component_premiums"] = quote["component_premiums"]
 
     underwriting = result.setdefault("underwriting", {})
     if quote.get("underwriting_basis"):
         underwriting["basis"] = quote["underwriting_basis"]
+    if quote.get("pre_existing_conditions"):
+        underwriting["pre_existing_conditions"] = quote["pre_existing_conditions"]
+
+    if quote.get("waiting_periods"):
+        result["waiting_periods"] = quote["waiting_periods"]
+
+    hints = quote.get("benefit_hints") or {}
+    benefits = result.setdefault("benefits", {})
+    for key, value in hints.items():
+        if value:
+            benefits[key] = value
 
     annual = _find_row(rows, "annual overall benefit maximum")
     if annual and not quote.get("annual_limit"):
@@ -469,5 +484,11 @@ PROVIDER: {provider_label}
     result.setdefault("provider", provider_label)
     result.setdefault("plan_name", target_plan or None)
     result.setdefault("target_plan_found", bool(target_plan or focused_table_context))
-    result.setdefault("confidence", "medium")
+    # A multi-component Bupa renewal pack can be high-confidence even when no
+    # single plan tier exists, because the certificate/invoice provide the
+    # headline facts deterministically.
+    if quote.get("renewal_package") and quote.get("premium") and quote.get("area_of_cover") and quote.get("components"):
+        result["confidence"] = "high"
+    else:
+        result.setdefault("confidence", "medium")
     return result

@@ -87,3 +87,55 @@ def test_fastapi_health_endpoint():
     response = TestClient(app).get('/health')
     assert response.status_code == 200
     assert response.json()['status'] == 'ok'
+
+
+def test_current_policy_upload_endpoint_returns_structured_facts(monkeypatch):
+    from fastapi.testclient import TestClient
+    import api.main as api_main
+
+    monkeypatch.setenv("HAL_BRIDGE_API_KEY", "secret")
+    monkeypatch.setattr(
+        api_main,
+        "extract_document",
+        lambda *_args, **_kwargs: type("X", (), {
+            "ok": True, "text": "Policy wording sample with enough usable text for extraction.",
+            "error": "", "content_hash": "abc", "pages": 3
+        })(),
+    )
+    monkeypatch.setattr(api_main, "identify_selected_plan", lambda *_a, **_k: {"plan_name": "Current Silver"})
+    monkeypatch.setattr(
+        api_main,
+        "analyze_target_plan",
+        lambda **_k: {
+            "provider": "Current insurer", "plan_name": "Current Silver",
+            "premium": {"amount": 2400, "currency": "EUR", "frequency": "Annual"},
+            "deductible_or_excess": "€500", "annual_limit": "€1,000,000",
+            "area_of_cover": "Europe", "underwriting": {"basis": "FMU"},
+            "benefits": {"inpatient": "Covered", "outpatient": "€3,000"},
+            "critical_limitations": [], "waiting_periods": [], "source_evidence": [],
+            "confidence": "high",
+        },
+    )
+    client = TestClient(api_main.app)
+    response = client.post(
+        "/api/v1/current-policy/analyze",
+        headers={"x-hal-bridge-key": "secret"},
+        files={"file": ("policy.pdf", b"%PDF fake content", "application/pdf")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan_name"] == "Current Silver"
+    assert body["premium"]["amount"] == 2400
+    assert body["benefits"]["outpatient"] == "€3,000"
+
+
+def test_current_policy_upload_rejects_unsupported_type(monkeypatch):
+    from fastapi.testclient import TestClient
+    import api.main as api_main
+    monkeypatch.setenv("HAL_BRIDGE_API_KEY", "secret")
+    response = TestClient(api_main.app).post(
+        "/api/v1/current-policy/analyze",
+        headers={"x-hal-bridge-key": "secret"},
+        files={"file": ("policy.exe", b"abc", "application/octet-stream")},
+    )
+    assert response.status_code == 400

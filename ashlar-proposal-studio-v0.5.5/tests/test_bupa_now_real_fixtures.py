@@ -100,5 +100,5 @@ def test_bupa_renewal_pack_multi_component_extraction():
     assert "€6,250.00" in facts["deductible_or_excess"]
     assert "€2,125,000.00" in facts["annual_limit"]
     assert facts["benefit_hints"]["maternity"].startswith("Covered after 24 months")
-    assert facts["pre_existing_conditions"] == "No personal exclusions apply."
+    assert facts["pre_existing_conditions"] == "No personal exclusions apply on the renewal certificate."
     assert len(facts["component_premiums"]) == 2

@@ -12,8 +12,80 @@ from core.extract import extract_document
 from core.plan_selector import identify_selected_plan
 from core.analyzer import analyze_target_plan
 from core.carriers import get_carrier_adapter
+from core.storage import list_documents, materialize_document, cache_document_text, create_document_signed_url
 
 app = FastAPI(title="Ashlar Proposal Studio API", version="0.5.0")
+
+
+def _supporting_wording_for(provider_label: str, carrier_id: str) -> tuple[str, list[dict]]:
+    """Return cached/extracted wording text and client-safe document metadata.
+
+    Provider Library documents are reusable insurer evidence. Applicant uploads
+    remain case-specific and are never promoted into this library.
+    """
+    provider_key = (provider_label or carrier_id or "").casefold()
+    aliases = {provider_key, carrier_id.casefold()}
+    if carrier_id == "bupa":
+        aliases.update({"bupa", "bupa global"})
+
+    wording_types = {
+        "policy wording", "policy_wording", "wording", "terms",
+        "terms and conditions", "membership guide", "membership_guide",
+        "guide", "table of benefits", "table_of_benefits",
+    }
+    try:
+        docs = list_documents()
+    except Exception:
+        return "", []
+
+    candidates = []
+    for doc in docs:
+        hay = " ".join([
+            doc.provider or "", doc.product or "", doc.doc_type or "",
+            doc.original_filename or "", doc.version or "",
+        ]).casefold()
+        if not any(alias and alias in hay for alias in aliases):
+            continue
+        dtype = (doc.doc_type or "").strip().casefold()
+        if dtype not in wording_types and not any(k in hay for k in ("membership guide","policy wording","terms and conditions","table of benefits")):
+            continue
+        candidates.append(doc)
+
+    # Latest uploads first. Limit context size and document count so a generic
+    # carrier library cannot swamp the applicant-specific renewal evidence.
+    candidates.sort(key=lambda d: (d.uploaded_at or "", d.version or ""), reverse=True)
+    texts: list[str] = []
+    metadata: list[dict] = []
+    for doc in candidates[:4]:
+        text_value = (doc.extracted_text or "").strip()
+        if not text_value:
+            try:
+                with materialize_document(doc) as local_path:
+                    extracted = extract_document(local_path, doc.original_filename)
+                if extracted.ok:
+                    text_value = extracted.text
+                    try:
+                        cache_document_text(doc.id, text_value)
+                    except Exception:
+                        pass
+            except Exception:
+                text_value = ""
+        if text_value:
+            texts.append(f"=== {doc.original_filename} ===\n{text_value[:70000]}")
+        try:
+            signed = create_document_signed_url(doc, expires_in_seconds=7 * 24 * 60 * 60)
+        except Exception:
+            signed = None
+        metadata.append({
+            "id": doc.id,
+            "provider": doc.provider,
+            "product": doc.product,
+            "version": doc.version,
+            "doc_type": doc.doc_type,
+            "filename": doc.original_filename,
+            "url": signed,
+        })
+    return "\n\n".join(texts), metadata
 
 
 def require_internal_key(x_ashlar_api_key: str | None = Header(default=None)) -> None:
@@ -110,12 +182,13 @@ async def analyze_current_policy(file: UploadFile = File(...)):
             or "Current policy"
         ).strip()
         provider_label = adapter.display_name if adapter.carrier_id != "generic" else "Current policy"
+        wording_text, supporting_documents = _supporting_wording_for(provider_label, adapter.carrier_id)
         analysis = analyze_target_plan(
             provider_label=provider_label,
             target_plan=target_plan,
             quotation_text=extracted.text,
             brochure_text="",
-            wording_text="",
+            wording_text=wording_text,
             focused_table_context="",
         )
 
@@ -135,6 +208,8 @@ async def analyze_current_policy(file: UploadFile = File(...)):
             "waiting_periods": analysis.get("waiting_periods") or [],
             "source_evidence": analysis.get("source_evidence") or [],
             "confidence": analysis.get("confidence") or "low",
+            "supporting_documents": supporting_documents,
+            "policy_wording_status": "attached" if wording_text else "not_attached",
         }
     finally:
         if tmp_path:

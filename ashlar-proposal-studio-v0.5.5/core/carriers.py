@@ -458,6 +458,18 @@ GENERIC = CarrierAdapter("generic", "Generic", tuple(), generic_quote_facts, "fa
 
 def get_carrier_adapter(provider_label: str = "", document_text: str = "") -> CarrierAdapter:
     combined = f"{provider_label}\n{document_text[:8000]}"
+    low = combined.casefold()
+
+    # Bupa renewal packs uploaded as a generic "Current policy" may omit the
+    # Bupa brand from the first page/filename while still carrying a distinctive
+    # certificate + Worldwide Medical structure.
+    if (
+        "your health plan renewal" in low
+        and "insurance certificate" in low
+        and ("worldwide medical insurance" in low or "worldwide medical plus" in low)
+    ):
+        return next(a for a in ADAPTERS if a.carrier_id == "bupa")
+
     for adapter in ADAPTERS:
         if adapter.matches(combined):
             return adapter

@@ -484,5 +484,11 @@ PROVIDER: {provider_label}
     result.setdefault("provider", provider_label)
     result.setdefault("plan_name", target_plan or None)
     result.setdefault("target_plan_found", bool(target_plan or focused_table_context))
-    result.setdefault("confidence", "medium")
+    # A multi-component Bupa renewal pack can be high-confidence even when no
+    # single plan tier exists, because the certificate/invoice provide the
+    # headline facts deterministically.
+    if quote.get("renewal_package") and quote.get("premium") and quote.get("area_of_cover") and quote.get("components"):
+        result["confidence"] = "high"
+    else:
+        result.setdefault("confidence", "medium")
     return result

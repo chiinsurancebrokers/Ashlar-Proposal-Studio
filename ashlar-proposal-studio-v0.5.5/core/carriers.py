@@ -214,7 +214,7 @@ def bupa_quote_facts(text: str) -> dict:
         facts["renewal_package"] = True
 
         area = re.search(
-            r"Area\s+of\s+cover\s+(?P<area>Worldwide\s+excluding\s+U\.?S\.?|Worldwide\s+including\s+U\.?S\.?|Europe)",
+            r"Area\s+of\s+cover(?:.|\n){0,260}?(?P<area>Worldwide\s+excluding\s+U\.?S\.?|Worldwide\s+including\s+U\.?S\.?|Europe)",
             text, flags=re.I,
         )
         if area:

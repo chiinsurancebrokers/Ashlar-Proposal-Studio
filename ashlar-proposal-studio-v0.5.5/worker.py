@@ -14,6 +14,7 @@ from core.case_archive import load_case, save_case_snapshot
 from core.chat import ask_case_agent
 from core.client_analysis import generate_client_analysis
 from core.jobs import claim_next_job, update_job, JobQueueError
+from core.policy_review import process_policy_review
 from core.report_schema import validate_client_report
 
 POLL_SECONDS = float(os.getenv("ASHLAR_WORKER_POLL_SECONDS", "1.5"))
@@ -93,6 +94,10 @@ def process(job: dict) -> None:
         process_report(job)
     elif kind == "hal_chat":
         process_chat(job)
+    elif kind == "policy_review":
+        # Website intake from https://ashlarassurance.com/have-my-policy-reviewed/
+        # Reads the uploaded policy, generates HAL summary, emails the client.
+        process_policy_review(job)
     else:
         raise ValueError(f"Unsupported job type: {kind}")
 

@@ -27,6 +27,8 @@ import html
 import json
 import os
 import re
+import traceback
+from datetime import datetime, timezone
 from functools import lru_cache
 from io import BytesIO
 from typing import Optional
@@ -498,16 +500,22 @@ def process_policy_review(job: dict) -> None:
     second_opinion = bool(case.get("second_opinion_requested"))
 
     update_job(jid, progress_stage="Emailing summary to the client")
+    email_errors: list[str] = []
     try:
         _send_email(
             to=client_email,
             subject=f"Your policy review from HAL · {reference}",
             html_body=_client_email_html(review, reference, second_opinion),
         )
-        _sb().table("analysis_cases").update({"summary_sent_at": "now()"}).eq("id", cid).execute()
+        _sb().table("analysis_cases").update({
+            "summary_sent_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", cid).execute()
+        print(f"[policy_review] {reference}: client summary emailed to {client_email}", flush=True)
     except Exception as exc:
         # Don't fail the whole job if email fails — the review is saved in Supabase.
-        update_job(jid, progress_stage=f"Client email failed: {exc}")
+        print(f"[policy_review] {reference}: CLIENT EMAIL FAILED: {exc}", flush=True)
+        traceback.print_exc()
+        email_errors.append(f"client email: {exc}")
 
     if second_opinion:
         update_job(jid, progress_stage="Notifying broker for second opinion")
@@ -517,18 +525,27 @@ def process_policy_review(job: dict) -> None:
                 subject=f"Second-opinion requested — {case.get('client_name') or 'client'} ({reference})",
                 html_body=_broker_email_html(case, review, reference),
             )
-            _sb().table("analysis_cases").update({"broker_notified_at": "now()"}).eq("id", cid).execute()
+            _sb().table("analysis_cases").update({
+                "broker_notified_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", cid).execute()
+            print(f"[policy_review] {reference}: broker notified at {CHRIS_INBOX}", flush=True)
         except Exception as exc:
-            update_job(jid, progress_stage=f"Broker notification failed: {exc}")
+            print(f"[policy_review] {reference}: BROKER EMAIL FAILED: {exc}", flush=True)
+            traceback.print_exc()
+            email_errors.append(f"broker email: {exc}")
 
-    update_job(
-        jid,
-        status="completed",
-        progress_stage="Policy review complete",
-        result_json={
+    final = {
+        "status": "completed",
+        "progress_stage": "Policy review complete" if not email_errors else "Policy review complete — email failed",
+        "result_json": {
             "case_id": cid,
             "reference": reference,
             "fit": (review.get("client_fit") or {}).get("fits") or "unclear",
             "second_opinion_requested": second_opinion,
+            "email_errors": email_errors,
         },
-    )
+    }
+    # Preserve email failures where they survive the completion update.
+    if email_errors:
+        final["error_message"] = " | ".join(email_errors)[:4000]
+    update_job(jid, **final)

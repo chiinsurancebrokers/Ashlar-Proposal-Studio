@@ -115,8 +115,25 @@ def _docx_to_text(blob: bytes) -> str:
 
 SYSTEM_PROMPT = """You are HAL, Ashlar Assurance's AI policy reader for international private
 medical insurance (IPMI), travel, group, maritime and student plans. You are
-reviewing one specific policy document that a prospective or current client has
-uploaded. Your job is to produce a plain-English review in Ashlar's voice.
+reviewing one or more documents a prospective or current client has uploaded
+for this policy — up to three, each labelled by purpose in the user turn:
+  (1) Table of Benefits / Benefit Schedule — the summary of what IS covered,
+      always provided when the client sends anything;
+  (2) Full policy wording — the authoritative document; it holds the real
+      exclusions, waiting periods, pre-authorisation rules, portability
+      clauses and governing law. When provided, you MUST cross-reference it
+      against the Table of Benefits: if the wording restricts, qualifies or
+      excludes something the Benefits schedule shows as covered, the wording
+      wins and your review reflects that;
+  (3) Current invoice / premium notice — confirms the real annual premium
+      being charged, the payment frequency, any loading, and the currency.
+      When provided, use its figures in the `price` section; do not re-read
+      prices from the Benefits sheet (prices there are often illustrative).
+
+Some documents may be missing. For any missing document, state what remains
+unverifiable in the `unclear_in_document` list, do not guess.
+
+Your job is to produce a plain-English review in Ashlar's voice.
 
 HARD RULES (never break):
 - Never invent figures. If a benefit, limit, exclusion or rule is not visible
@@ -203,61 +220,101 @@ Only emit the JSON object, nothing before or after.
 """
 
 
-def _build_prompt(client_profile: str, client_priorities: str) -> str:
+DocBundle = dict  # keys: slot ('benefits'|'wording'|'invoice'), blob, mime
+
+
+def _doc_label(slot: str) -> str:
+    return {
+        "benefits": "Table of Benefits / Benefit Schedule",
+        "wording": "Full policy wording",
+        "invoice": "Current invoice / premium notice",
+    }.get(slot, slot)
+
+
+def _attach_doc(user_content: list[dict], slot: str, blob: bytes, mime: str) -> None:
+    """Attach one document to the Claude user turn, labelled by purpose."""
+    label = _doc_label(slot)
+    user_content.append(
+        {
+            "type": "text",
+            "text": f"--- Attachment: {label} ---",
+        }
+    )
+    if mime == "application/pdf":
+        user_content.append(
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": base64.standard_b64encode(blob).decode("ascii"),
+                },
+            }
+        )
+    elif mime in ("image/png", "image/jpeg"):
+        user_content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime,
+                    "data": base64.standard_b64encode(blob).decode("ascii"),
+                },
+            }
+        )
+    elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        text = _docx_to_text(blob)
+        user_content.append(
+            {
+                "type": "text",
+                "text": (
+                    f"The {label.lower()} was uploaded as a .docx file. Below is "
+                    "the extracted text; treat it as that document.\n\n"
+                    f"<document>\n{text}\n</document>"
+                ),
+            }
+        )
+    else:
+        raise PolicyReviewError(f"Unsupported upload type for AI review ({slot}): {mime}")
+
+
+def _build_prompt(client_profile: str, client_priorities: str, received_slots: list[str]) -> str:
+    labels = ", ".join(_doc_label(s) for s in received_slots) if received_slots else "(none)"
+    missing = [s for s in ("benefits", "wording", "invoice") if s not in received_slots]
+    missing_note = (
+        "\n\nDocuments NOT provided: "
+        + ", ".join(_doc_label(s) for s in missing)
+        + ". For anything that would normally live in a missing document, say so "
+          "plainly in `unclear_in_document`."
+        if missing
+        else ""
+    )
     return (
-        "The client provided this profile:\n"
-        f"{client_profile or '(not provided)'}\n\n"
-        "They told us to focus on:\n"
-        f"{client_priorities or '(not provided)'}\n\n"
-        "Read the attached policy document and return the JSON object as instructed."
+        f"The client provided this profile:\n{client_profile or '(not provided)'}\n\n"
+        f"They told us to focus on:\n{client_priorities or '(not provided)'}\n\n"
+        f"Documents attached in this turn: {labels}.{missing_note}\n\n"
+        "Read every attached document and return the JSON object as instructed."
     )
 
 
 # ---------- Claude call --------------------------------------------------
 
 
-def _call_claude(file_blob: bytes, mime: str, client_profile: str, client_priorities: str) -> dict:
+def _call_claude(docs: list[DocBundle], client_profile: str, client_priorities: str) -> dict:
+    if not docs:
+        raise PolicyReviewError("No documents were provided for review.")
     client = _anthropic()
     user_content: list[dict] = []
 
-    text_prompt = _build_prompt(client_profile, client_priorities)
+    for d in docs:
+        _attach_doc(user_content, d["slot"], d["blob"], d["mime"])
 
-    if mime == "application/pdf":
-        b64 = base64.standard_b64encode(file_blob).decode("ascii")
-        user_content.append(
-            {
-                "type": "document",
-                "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
-            }
-        )
-    elif mime in ("image/png", "image/jpeg"):
-        b64 = base64.standard_b64encode(file_blob).decode("ascii")
-        user_content.append(
-            {
-                "type": "image",
-                "source": {"type": "base64", "media_type": mime, "data": b64},
-            }
-        )
-    elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        text = _docx_to_text(file_blob)
-        user_content.append(
-            {
-                "type": "text",
-                "text": (
-                    "The policy was uploaded as a .docx file. Below is the "
-                    "extracted text; treat it as the policy document.\n\n"
-                    f"<policy_document>\n{text}\n</policy_document>"
-                ),
-            }
-        )
-    else:
-        raise PolicyReviewError(f"Unsupported upload type for AI review: {mime}")
-
-    user_content.append({"type": "text", "text": text_prompt})
+    received_slots = [d["slot"] for d in docs]
+    user_content.append({"type": "text", "text": _build_prompt(client_profile, client_priorities, received_slots)})
 
     message = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=4096,
+        max_tokens=16000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
     )
@@ -267,9 +324,21 @@ def _call_claude(file_blob: bytes, mime: str, client_profile: str, client_priori
         block.text for block in message.content if getattr(block, "type", None) == "text"
     ).strip()
 
-    parsed = parse_best_json_object(raw)
+    # The top-level object must carry every top-level key the schema defines,
+    # otherwise we picked a nested fragment such as the "identity" object.
+    REQUIRED_TOP_KEYS = (
+        "identity", "scope", "benefits", "rules",
+        "exclusions_to_flag", "price", "ashlar_summary",
+        "client_fit", "unclear_in_document", "attributions",
+    )
+    parsed = parse_best_json_object(raw, required_keys=REQUIRED_TOP_KEYS)
     if not parsed:
         raise PolicyReviewError("Claude did not return a valid JSON policy review.")
+    # Guard against nested-fragment selection: the top-level MUST have identity + benefits.
+    if not (isinstance(parsed.get("identity"), dict) and isinstance(parsed.get("benefits"), list)):
+        raise PolicyReviewError(
+            f"Claude JSON missing identity/benefits top-level keys. Got keys: {list(parsed.keys())[:12]}"
+        )
     return parsed
 
 
@@ -357,12 +426,45 @@ def _client_email_html(review: dict, reference: str, second_opinion: bool) -> st
     exclusions_html = "".join(f"<li>{html.escape(str(e))}</li>" for e in exclusions)
     unclear_html = "".join(f"<li>{html.escape(str(u))}</li>" for u in unclear)
 
+    docs_received = review.get("_documents_received") or {}
+    docs_rows: list[str] = []
+    doc_labels = (
+        ("benefits", "Table of Benefits"),
+        ("wording", "Full policy wording"),
+        ("invoice", "Current invoice"),
+    )
+    for slot, label in doc_labels:
+        got = bool(docs_received.get(slot))
+        mark = "✓" if got else "—"
+        colour = "#4A6E6B" if got else "#98a2c8"
+        state = "Read" if got else "Not provided"
+        docs_rows.append(
+            f"<li style='font-family:Georgia,serif;margin:0;padding:2px 0;'>"
+            f"<span style='color:{colour};font-weight:600;'>{mark}</span> "
+            f"{html.escape(label)} — <span style='color:#4A6E6B;font-family:monospace;font-size:12px;'>{state}</span></li>"
+        )
+    docs_block = (
+        "<div style='margin-top:20px;padding:14px 18px;border:1px solid #D7CDBC;background:#F9F6EE;'>"
+        "<p style='margin:0 0 6px;font-family:monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#4A6E6B;'>Documents HAL read</p>"
+        "<ul style='list-style:none;margin:0;padding:0;'>" + "".join(docs_rows) + "</ul>"
+        "</div>"
+    )
+
     second_opinion_block = ""
     if second_opinion:
+        wording_note = ""
+        if not docs_received.get("wording"):
+            wording_note = (
+                "<p style='margin:8px 0 0;font-family:Georgia,serif;color:#70181C;'>"
+                "You did not attach your full policy wording. The broker review needs it to confirm exclusions, waiting periods and pre-authorisation rules. "
+                "Please reply to this email with the wording attached, or write to " + html.escape(CHRIS_INBOX) + "."
+                "</p>"
+            )
         second_opinion_block = (
             "<div style='margin-top:28px;padding:16px 20px;border:1px solid #D7CDBC;background:#F9F6EE;'>"
             "<p style='margin:0 0 8px;font-family:Georgia,serif;'><strong>Second opinion requested.</strong></p>"
             "<p style='margin:0;font-family:Georgia,serif;'>A licensed Ashlar broker will verify HAL's analysis against your profile and reply within one business day.</p>"
+            f"{wording_note}"
             "</div>"
         )
 
@@ -398,6 +500,8 @@ def _client_email_html(review: dict, reference: str, second_opinion: bool) -> st
   <h2 style="font-family:Georgia,serif;font-size:18px;margin:24px 0 8px;">Does this plan fit you?</h2>
   <p style="font-family:Georgia,serif;margin:0;"><strong>{html.escape((fit.get('fits') or 'unclear').title())}.</strong> {html.escape(fit.get('reason') or '')}</p>
 
+  {docs_block}
+
   {second_opinion_block}
 
   <p style="font-family:monospace;color:#70181C;font-size:12px;margin-top:28px;padding-top:16px;border-top:1px solid #D7CDBC;">
@@ -422,12 +526,53 @@ def _broker_email_html(case: dict, review: dict, reference: str) -> str:
     fit = review.get("client_fit") or {}
     client_profile = html.escape(case.get("client_profile") or "")
     client_priorities = html.escape(case.get("client_priorities") or "")
+
+    docs_received = review.get("_documents_received") or {}
+    paths = {
+        "benefits": case.get("uploaded_file_path"),
+        "wording": case.get("uploaded_wording_path"),
+        "invoice": case.get("uploaded_invoice_path"),
+    }
+    doc_rows: list[str] = []
+    for slot, label in (("benefits", "Table of Benefits"), ("wording", "Full policy wording"), ("invoice", "Current invoice")):
+        got = bool(docs_received.get(slot))
+        path = paths.get(slot)
+        mark = "✓" if got else "✗"
+        colour = "#4A6E6B" if got else "#70181C"
+        detail = f"<code>{html.escape(path)}</code>" if path else "<em>not provided</em>"
+        doc_rows.append(
+            f"<tr>"
+            f"<td style='padding:4px 10px;border-bottom:1px solid #D7CDBC;color:{colour};font-weight:600;'>{mark} {html.escape(label)}</td>"
+            f"<td style='padding:4px 10px;border-bottom:1px solid #D7CDBC;font-family:monospace;font-size:11px;'>{detail}</td>"
+            f"</tr>"
+        )
+    docs_table = (
+        "<table style='border-collapse:collapse;width:100%;margin:12px 0 16px;'>"
+        + "".join(doc_rows)
+        + "</table>"
+    )
+
+    wording_warning = ""
+    if not docs_received.get("wording"):
+        wording_warning = (
+            "<p style='margin:8px 0 16px;padding:10px 14px;border:1px solid #70181C;background:#faecec;font-family:Georgia,serif;color:#70181C;'>"
+            "<strong>Policy wording not attached.</strong> Second opinion was requested without the wording — "
+            "ask the client to send it before writing the broker review. HAL could not confirm exclusions, "
+            "waiting periods or pre-authorisation rules from the Table of Benefits alone."
+            "</p>"
+        )
+
     return f"""
 <div style="font-family:Georgia,serif;color:#1B2432;max-width:720px;margin:0 auto;padding:20px;">
   <p style="font-family:monospace;color:#70181C;letter-spacing:0.14em;text-transform:uppercase;font-size:12px;margin:0 0 8px;">Second-opinion requested · {html.escape(reference)}</p>
   <h1 style="font-family:Georgia,serif;font-size:22px;margin:0 0 12px;">{html.escape(case.get('client_name') or '')} — {html.escape(case.get('client_email') or '')}</h1>
   <p style="font-family:Georgia,serif;margin:0 0 4px;"><strong>Policy:</strong> {html.escape(plan_label)}</p>
   <p style="font-family:Georgia,serif;margin:0 0 16px;"><strong>HAL verdict:</strong> {html.escape((fit.get('fits') or 'unclear').title())} — {html.escape(fit.get('reason') or '')}</p>
+
+  {wording_warning}
+
+  <p style="font-family:Georgia,serif;margin:12px 0 4px;"><strong>Documents (bucket: <code>{html.escape(POLICY_UPLOAD_BUCKET)}</code>)</strong></p>
+  {docs_table}
 
   <p style="font-family:Georgia,serif;margin:12px 0 4px;"><strong>Client profile</strong></p>
   <pre style="white-space:pre-wrap;font-family:monospace;background:#F9F6EE;padding:12px;border:1px solid #D7CDBC;margin:0 0 16px;">{client_profile}</pre>
@@ -439,7 +584,7 @@ def _broker_email_html(case: dict, review: dict, reference: str) -> str:
   <pre style="white-space:pre-wrap;font-family:monospace;font-size:11px;background:#F9F6EE;padding:12px;border:1px solid #D7CDBC;margin:0 0 16px;max-height:400px;overflow:auto;">{html.escape(json.dumps(review, indent=2, ensure_ascii=False))}</pre>
 
   <p style="font-family:Georgia,serif;color:#4A6E6B;font-size:12px;">
-    The client ticked "second opinion". Reply within one business day. The uploaded policy document is in the Supabase bucket <code>{html.escape(POLICY_UPLOAD_BUCKET)}</code> under <code>{html.escape(case.get('uploaded_file_path') or '')}</code>.
+    The client ticked "second opinion". Reply within one business day.
   </p>
 </div>
 """.strip()
@@ -464,21 +609,37 @@ def process_policy_review(job: dict) -> None:
     if not client_email:
         raise PolicyReviewError(f"Case {cid} has no client_email.")
 
-    uploaded_path = case.get("uploaded_file_path")
-    uploaded_mime = (case.get("uploaded_file_mime") or "").lower()
-    if not uploaded_path or not uploaded_mime:
-        raise PolicyReviewError(f"Case {cid} has no uploaded_file_path/mime.")
+    # Collect every uploaded document the intake stored for this case.
+    doc_slots: list[DocBundle] = []
+    for slot, path_key, mime_key in (
+        ("benefits", "uploaded_file_path", "uploaded_file_mime"),
+        ("wording", "uploaded_wording_path", "uploaded_wording_mime"),
+        ("invoice", "uploaded_invoice_path", "uploaded_invoice_mime"),
+    ):
+        p = case.get(path_key)
+        m = (case.get(mime_key) or "").lower()
+        if not (p and m):
+            continue
+        try:
+            blob = _download_upload(p)
+        except PolicyReviewError as exc:
+            print(f"[policy_review] {cid}: download of {slot} ({p}) failed: {exc}", flush=True)
+            continue
+        doc_slots.append({"slot": slot, "blob": blob, "mime": m})
 
-    update_job(jid, progress_stage="Downloading uploaded policy")
-    blob = _download_upload(uploaded_path)
+    if not doc_slots:
+        raise PolicyReviewError(f"Case {cid} has no readable uploaded documents.")
 
-    update_job(jid, progress_stage="HAL is reading the policy")
+    update_job(jid, progress_stage=f"HAL is reading {len(doc_slots)} document(s)")
     review = _call_claude(
-        file_blob=blob,
-        mime=uploaded_mime,
+        docs=doc_slots,
         client_profile=case.get("client_profile") or "",
         client_priorities=case.get("client_priorities") or "",
     )
+    # Record which documents HAL actually read, for the email + broker.
+    review["_documents_received"] = {d["slot"]: True for d in doc_slots}
+    for s in ("benefits", "wording", "invoice"):
+        review["_documents_received"].setdefault(s, False)
 
     update_job(jid, progress_stage="Saving review")
     save_case_snapshot(

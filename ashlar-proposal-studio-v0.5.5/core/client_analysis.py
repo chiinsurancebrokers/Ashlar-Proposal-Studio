@@ -1509,6 +1509,13 @@ def _assemble_modular_report(*, payload: dict, synthesis: dict, language: str) -
     return report
 
 
+# Output budgets for the two synthesis calls. The text is clipped to the
+# report's word limits afterwards, so a generous ceiling only prevents a
+# stronger, more verbose model from being cut off mid-JSON.
+_SYNTHESIS_BUDGET = int(os.getenv("CLIENT_SYNTHESIS_MAX_TOKENS", "8000"))
+_SYNTHESIS_RETRY_BUDGET = int(os.getenv("CLIENT_SYNTHESIS_RETRY_MAX_TOKENS", "12000"))
+
+
 def generate_client_analysis(
     *,
     case_reference: str,
@@ -1562,7 +1569,7 @@ def generate_client_analysis(
     )
     decision_payload = _compact_decision_payload(payload)
     import anthropic
-    timeout_seconds = float(os.getenv("CLIENT_ANALYSIS_TIMEOUT_SECONDS", "120"))
+    timeout_seconds = float(os.getenv("CLIENT_ANALYSIS_TIMEOUT_SECONDS", "300"))
 
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=timeout_seconds)
@@ -1576,7 +1583,7 @@ def generate_client_analysis(
         try:
             response = client.messages.create(
                 model=model,
-                max_tokens=2600,
+                max_tokens=_SYNTHESIS_BUDGET,
                 messages=[{"role": "user", "content": summary_prompt}],
             )
             raw_summary = _response_text(response)
@@ -1586,7 +1593,7 @@ def generate_client_analysis(
         except ClientReportValidationError:
             response = client.messages.create(
                 model=model,
-                max_tokens=3200,
+                max_tokens=_SYNTHESIS_RETRY_BUDGET,
                 messages=[{"role": "user", "content": summary_prompt + "\n\nRETRY: Use materially shorter wording and return the complete JSON object only."}],
             )
             raw_summary = _response_text(response)
@@ -1609,7 +1616,7 @@ def generate_client_analysis(
         try:
             response = client.messages.create(
                 model=model,
-                max_tokens=1800,
+                max_tokens=_SYNTHESIS_BUDGET,
                 messages=[{"role": "user", "content": assessment_prompt}],
             )
             raw_assessment = _response_text(response)
@@ -1619,7 +1626,7 @@ def generate_client_analysis(
         except ClientReportValidationError:
             response = client.messages.create(
                 model=model,
-                max_tokens=2400,
+                max_tokens=_SYNTHESIS_RETRY_BUDGET,
                 messages=[{"role": "user", "content": assessment_prompt + "\n\nRETRY: Return only the compact ashlar_assessment JSON. Keep every reason to one or two sentences."}],
             )
             raw_assessment = _response_text(response)

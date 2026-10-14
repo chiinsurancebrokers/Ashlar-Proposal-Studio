@@ -8,6 +8,7 @@ import re
 
 from .json_utils import parse_first_json_object
 from .carriers import get_carrier_adapter, carrier_metadata
+from .amounts import canonical_amount, parse_amount
 
 
 SCHEMA_PROMPT = """You are the analysis engine inside Ashlar Proposal Studio.
@@ -103,10 +104,8 @@ def _missing(value) -> bool:
 
 
 def _amount_number(raw: str) -> float:
-    try:
-        return float(raw.replace(",", ""))
-    except Exception:
-        return -1.0
+    value = parse_amount(raw)
+    return -1.0 if value is None else value
 
 
 def _currency_symbol(token: str) -> str:
@@ -138,7 +137,7 @@ def _extract_quote_facts(text: str) -> dict:
     if candidates:
         _, cur, amt = max(candidates, key=lambda x: x[0])
         facts["premium"] = {
-            "amount": amt.replace(",", ""),
+            "amount": canonical_amount(amt),
             "currency": _currency_symbol(cur),
             "frequency": "Annual",
         }

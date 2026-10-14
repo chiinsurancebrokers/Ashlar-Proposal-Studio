@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 
+from .amounts import annual_factor, parse_amount
 from .json_utils import parse_best_json_object, parse_json_objects
 from .report_schema import ClientReportValidationError, validate_client_report
 
@@ -1033,35 +1034,25 @@ def _plan_identity(plan: dict) -> str:
 
 def _number_from_text(value: Any) -> float | None:
     text = str(value or "")
-    # keep the first plausible money/limit number; separators may be commas or spaces
+    # keep the first plausible money/limit number; thousands may be grouped with
+    # spaces or apostrophes, and the decimal separator may be a comma (6840,91).
     m = re.search(r"(?<!\d)(\d{1,3}(?:[ ,.']\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)", text)
     if not m:
         return None
-    raw = m.group(1).replace(" ", "").replace("'", "")
-    # Thousands commas are much more common in the extracted IPMI limits/premiums.
-    if raw.count(',') and raw.count('.') == 0:
-        bits = raw.split(',')
-        if len(bits[-1]) == 3:
-            raw = ''.join(bits)
-        else:
-            raw = raw.replace(',', '.')
-    elif raw.count(',') and raw.count('.'):
-        raw = raw.replace(',', '')
-    try:
-        return float(raw)
-    except ValueError:
-        return None
+    return parse_amount(m.group(1).replace(" ", ""))
 
 
 def _premium_value(plan: dict) -> tuple[str, float] | None:
+    """Premium as (currency, annual amount) so monthly and annual quotes compare fairly."""
     premium = plan.get("premium") or {}
     if not isinstance(premium, dict):
         return None
     amount = _number_from_text(premium.get("amount"))
     currency = str(premium.get("currency") or "").strip().upper()
-    if amount is None or not currency:
+    factor = annual_factor(premium.get("frequency"))
+    if amount is None or not currency or factor is None:
         return None
-    return currency, amount
+    return currency, round(amount * factor, 2)
 
 
 def _derived_decision_facts(payload: dict) -> dict:
@@ -1082,6 +1073,7 @@ def _derived_decision_facts(payload: dict) -> dict:
     if len(premium_rows) == len(plans) and len(currencies)==1 and premium_rows:
         ordered=sorted(premium_rows, key=lambda r:r[2])
         out["premium_currency"] = ordered[0][1]
+        out["premium_basis"] = "annual (monthly, quarterly and half-yearly quotes annualised)"
         out["lowest_premium"] = {"plan":_plan_identity(ordered[0][0]), "amount":ordered[0][2]}
         out["highest_premium"] = {"plan":_plan_identity(ordered[-1][0]), "amount":ordered[-1][2]}
         out["premium_order_low_to_high"] = [_plan_identity(r[0]) for r in ordered]

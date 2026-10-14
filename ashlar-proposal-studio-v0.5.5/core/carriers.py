@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import re
 from typing import Callable
 
+from .amounts import canonical_amount, parse_amount
+
 
 MISSING = {"", "—", "-", "not specified", "not mentioned", "unclear", "null", "none"}
 
@@ -23,10 +25,8 @@ def missing(value) -> bool:
 
 
 def _number(raw: str) -> float:
-    try:
-        return float(raw.replace(",", ""))
-    except Exception:
-        return -1.0
+    value = parse_amount(raw)
+    return -1.0 if value is None else value
 
 
 def _currency_code(token: str) -> str:
@@ -73,7 +73,7 @@ def _premium_from_anchored_patterns(text: str) -> dict | None:
     if not candidates:
         return None
     _, cur, amt = max(candidates, key=lambda x: x[0])
-    return {"amount": amt.replace(",", ""), "currency": _currency_code(cur), "frequency": "Annual"}
+    return {"amount": canonical_amount(amt), "currency": _currency_code(cur), "frequency": "Annual"}
 
 
 def _generic_area(text: str) -> str | None:
@@ -158,7 +158,7 @@ def cigna_quote_facts(text: str) -> dict:
         flags=re.IGNORECASE | re.DOTALL,
     )
     if m:
-        facts["premium"] = {"amount": m.group("amt").replace(",", ""), "currency": _currency_code(m.group("cur")), "frequency": "Annual"}
+        facts["premium"] = {"amount": canonical_amount(m.group("amt")), "currency": _currency_code(m.group("cur")), "frequency": "Annual"}
         facts["quote_currency"] = facts["premium"]["currency"]
         facts["quoted_plan"] = m.group("plan").title()
     d = re.search(
@@ -228,7 +228,7 @@ def bupa_quote_facts(text: str) -> dict:
         )
         if total:
             facts["premium"] = {
-                "amount": total.group("amt").replace(",", ""),
+                "amount": canonical_amount(total.group("amt")),
                 "currency": "EUR",
                 "frequency": "Annual",
             }
@@ -301,7 +301,7 @@ def bupa_quote_facts(text: str) -> dict:
         flags=re.IGNORECASE | re.DOTALL,
     )
     if premium:
-        facts["premium"] = {"amount": premium.group("amt").replace(",", ""), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
+        facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
         facts["quote_currency"] = facts["premium"]["currency"]
 
     allowance = re.search(
@@ -357,7 +357,7 @@ def now_health_quote_facts(text: str) -> dict:
 
     premium = re.search(r"Final\s+Total\s+Premium\s*:\s*(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)", text, flags=re.IGNORECASE)
     if premium:
-        facts["premium"] = {"amount": premium.group("amt").replace(",", ""), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
+        facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
         facts["quote_currency"] = facts["premium"]["currency"]
 
     uw = re.search(r"Underwriting\s+Basis\s*:\s*(?P<uw>[^\n\r]+)", text, flags=re.IGNORECASE)

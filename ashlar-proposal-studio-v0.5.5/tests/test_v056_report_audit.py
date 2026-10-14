@@ -413,3 +413,117 @@ def test_analysis_call_retries_cut_off_answer_and_picks_outer_object():
     result, raw, err = _call_model(SimpleNamespace(messages=Messages()), "claude-opus-5-5", "PROMPT")
     assert err is None and result["benefits"]["inpatient"] == "100%" and len(calls) == 2
     assert calls[0]["max_tokens"] == 16000 and "cut off" in calls[1]["messages"][0]["content"]
+
+
+PROVIDERS_LIST_PAGES = """--- LIBRARY DOCUMENT: pdf-product-myhealth-international-2.0-providers-list-en-2025.pdf [APRIL / MYHEALTH / 2026 / supporting] ---
+Explore and Essential: Full cover within the limits of reasonable and customary costs: all hospitals worldwide
+except those listed under the Extensive and Elite plans.
+If you choose a hospital listed under "Extensive" or "Elite", 40% of the expenses incurred will remain at your charge.
+--- PAGE 4 ---
+Asia
+
+
+   In the tables below:
+     indicates that 40% of the incurred expenses will remain at your charge if you choose this hospital
+
+
+  Cambodia
+
+
+                                     Explore      Extensive        City             Hospital name           & Essential     & Elite
+
+                      Royal Phnom Penh Hospital
+                ANY HOSPITAL NOT LISTED ABOVE
+
+--- PAGE 12 ---
+Europe
+
+
+   United Kingdom
+
+
+                                     Explore      Extensive        City             Hospital name           & Essential     & Elite
+
+                     Cromwell Hospital
+                ANY HOSPITAL NOT LISTED ABOVE
+"""
+
+
+def test_providers_list_countries_and_destination_note():
+    from core.plan_rules import destination_country, listed_network_countries, localise_access_rows
+    text = APRIL_TOB_EXCERPT.split("--- LIBRARY DOCUMENT: pdf-product-myhealth-international-2.0-providers")[0] + PROVIDERS_LIST_PAGES
+    assert listed_network_countries(text) == ["Cambodia", "United Kingdom"]
+    rules = extract_access_rules(text)
+    assert rules["network_listed_countries"] == ["Cambodia", "United Kingdom"]
+    assert destination_country("family of 3, moving to France") == "France"
+    assert destination_country("Expat family based in London, United Kingdom", ["Cambodia", "United Kingdom"]) == "United Kingdom"
+
+    result = {"critical_limitations": [
+        {"topic": "Hospital network tier", "detail": "Planned hospitalisation must be in the 'Explore & Essential' network tier. Otherwise a 40% co-payment applies. No France listing appears, so verify French hospitals."},
+    ]}
+    apply_access_rules(result, text)
+    topics = [x["topic"] for x in result["critical_limitations"]]
+    assert "Hospital network tier" not in topics and topics[0] == "Hospital network"
+
+    row = localise_access_rows([{"analysis": result}], "family of 3, moving to France")[0]["analysis"]["critical_limitations"][0]
+    assert "France is not on that list" in row["detail"] and "every hospital in France is covered in full" in row["detail"]
+    row = localise_access_rows([{"analysis": result}], "family based in the United Kingdom")[0]["analysis"]["critical_limitations"][0]
+    assert "United Kingdom is on that list: check the hospital" in row["detail"]
+    # No destination: the stored row is left as it was.
+    assert localise_access_rows([{"analysis": result}], "family of 3")[0]["analysis"] is result
+    # The considerations clip keeps the destination sentence.
+    cons = _plan_narrative_from_verified_facts({"benefits": {}, **localise_access_rows([{"analysis": result}], "moving to France")[0]["analysis"]})["considerations"]
+    assert "France is not on that list" in cons[0]
+
+
+BUPA_PREAUTH_PAGE = """If you need treatment and you know or think one of
+the below applies to you, you must contact us for
+pre-authorisation before you receive your treatment. If you                                   If you are taken to an 'out-of-network' benefit provider
+don't get the following pre-authorised we will not cover the    Our approach to costs         in an emergency, it is important that you, or the benefit
+cost:                                         When you are in need of a benefit provider,    provider, contact us within 48 hours of your admission,
+                                                   team can help you find a Recognised medical practitioner,
+¡  staying overnight in hospital                               hospital or healthcare facility within network.
+¡   visiting hospital as a day-patient                      you can view a summary of benefit providers
+¡  having treatment for cancer                               Finder at https://bupaglobal.com/en/facilities/finder.
+¡  having advanced imaging, for example magnetic         Where you choose to have your treatment and services
+   resonance imaging (MRI), computerised tomography (CT)   with a benefit provider in network, we will cover the costs
+   or positron emission tomography (PET)                    of any covered benefits, once any applicable co-insurance
+¡  rehabilitation                                           or deductible amount which you are responsible to pay has
+¡  transportation/travel                                    been taken from the total claimed amount.
+In-patient stays of 5 nights or more need pre-authorisation.
+"""
+
+
+def test_bupa_preauthorisation_list_and_emergency_notice():
+    rules = extract_access_rules(BUPA_PREAUTH_PAGE)
+    assert rules["preauth_items"] == [
+        "staying overnight in hospital", "visiting hospital as a day-patient", "treatment for cancer",
+        "advanced imaging", "rehabilitation", "transportation/travel",
+    ]
+    assert rules["emergency_notice_hours"] == 48
+    result = {"critical_limitations": [
+        {"topic": "Mandatory pre-authorisation", "detail": "The following will not be covered unless pre-authorised: overnight stays."},
+        {"topic": "Out-of-network providers", "detail": "Only Reasonable and Customary costs are paid."},
+    ]}
+    apply_access_rules(result, BUPA_PREAUTH_PAGE)
+    rows = result["critical_limitations"]
+    assert [r["topic"] for r in rows] == ["Pre-authorisation", "Out-of-network providers"]
+    assert "staying overnight in hospital" in rows[0]["detail"] and "within 48 hours" in rows[0]["detail"]
+    cons = _plan_narrative_from_verified_facts({"benefits": {}, **result})["considerations"]
+    assert "48 hours" in cons[0]
+
+
+def test_visit_limit_is_per_benefit_unless_documents_say_shared():
+    from core.plan_rules import ground_shared_limits
+    doc = ("SPECIALISTS Up to 15 consultations each policy year. QUALIFIED NURSES Up to 15 consultations each policy year. "
+           "IPID: 15 visits: specialists' consultations, doctors' fees, qualified nurses, mental health, physiotherapists.")
+    r = {"critical_limitations": [{"topic": "Out-patient annual cap", "detail":
+         "Capped at EUR 9,400. Consultations are limited to 15 per year, shared across specialists/doctors, nurses and mental health (per IPID)."}],
+         "benefits": {}}
+    ground_shared_limits(r, doc)
+    detail = r["critical_limitations"][0]["detail"]
+    assert "shared" not in detail and "15 per year for each of specialists/doctors" in detail
+    # A limit the documents call combined is left alone.
+    r2 = {"critical_limitations": [{"topic": "Therapies", "detail": "10 sessions per year, shared across physiotherapy and osteopathy."}]}
+    ground_shared_limits(r2, "Physiotherapy and osteopathy: 10 sessions per year in total (combined).")
+    assert "shared across" in r2["critical_limitations"][0]["detail"]

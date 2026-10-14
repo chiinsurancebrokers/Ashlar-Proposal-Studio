@@ -40,6 +40,8 @@ NON-NEGOTIABLE RULES:
 - Brochures are summaries. Policy wording/certificate remains the governing source.
 - If deterministic evidence contains a value, DO NOT return null for that field.
 - Keep diagnostics/advanced imaging separate from preventive or wellness benefits. MRI, CT and PET are diagnostic imaging, not wellness benefits.
+- A visit or consultation limit applies to each benefit separately unless the document says it is shared, combined or in total. Summary documents (IPID, key facts) that list several benefits after one number are listing per-benefit limits.
+- A providers/hospital list that names hospitals country by country restricts only the countries it lists; do not tell the client to verify hospitals in a country the list does not mention.
 
 Return ONLY valid JSON:
 {

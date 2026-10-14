@@ -38,6 +38,10 @@ def extract_access_rules(text: str) -> dict:
         rules["network_copayment_pct"] = int(network.group("pct"))
         rules["network_tiered"] = bool(re.search(r"all hospitals worldwide.{0,80}?except those listed", t, re.I))
         rules["emergency_exempt"] = bool(re.search(r"except (?:in cases of )?(?:medical |life-threatening )?emergenc", t, re.I))
+        if rules["network_tiered"]:
+            countries = listed_network_countries(text)
+            if countries:
+                rules["network_listed_countries"] = countries
 
     approval = _first((
         r"hospitali[sz]ations? (?:are|is) subject to prior approval\.?\s*A (?P<pct>\d{1,2})\s*% penalty",
@@ -56,33 +60,136 @@ def extract_access_rules(text: str) -> dict:
         if lead:
             rules["pre_approval_lead_days"] = int(lead.group("days"))
 
-    # "Benefit may/will not be paid unless pre-authorisation has been provided"
+    # "Benefit may/will not be paid unless pre-authorisation has been provided" /
+    # "If you don't get the following pre-authorised we will not cover the cost"
     # (Bupa): no fixed penalty, the claim itself is at risk.
     if not rules.get("hospital_prior_approval_penalty_pct") and re.search(
-        r"benefits? (?:will|may) not be paid unless pre-?\s?authori[sz]ation", t, re.I
+        r"benefits? (?:will|may) not be paid unless pre-?\s?authori[sz]ation"
+        r"|(?:don.?t|do not) get the following pre-?\s?authori[sz]ed,? we will not (?:cover|pay)",
+        t, re.I,
     ):
         rules["preauth_or_no_payment"] = True
+        items = preauth_required_items(text)
+        if items:
+            rules["preauth_items"] = items
         stay = re.search(r"in-patient stays of (?P<n>\d+) nights or more need pre-?\s?authori[sz]ation", t, re.I)
         if stay:
+            # A medical report before that night, on top of the admission pre-authorisation.
             rules["preauth_inpatient_nights"] = int(stay.group("n"))
+        notice = re.search(r"contact us within (?P<h>\d{1,3}) hours of (?:your|the) admission", t, re.I)
+        if notice:
+            rules["emergency_notice_hours"] = int(notice.group("h"))
 
     if re.search(r"LIBRARY DOCUMENT: [^\n]*(?:providers?|hospitals?)[-_ ]list", str(text or ""), re.I):
         rules["provider_list_supplied"] = True
     return rules
 
 
-def access_rule_limitations(rules: dict) -> list[dict]:
+def _document_sections(text: str, name_pattern: str) -> str:
+    """The text of the library documents whose header matches ``name_pattern``
+    (the whole text when the documents carry no headers)."""
+    raw = str(text or "")
+    headers = list(re.finditer(r"^--- LIBRARY DOCUMENT: [^\n]*---$", raw, re.M))
+    if not headers:
+        return raw
+    parts = []
+    for i, h in enumerate(headers):
+        if re.search(name_pattern, h.group(0), re.I):
+            end = headers[i + 1].start() if i + 1 < len(headers) else len(raw)
+            parts.append(raw[h.start():end])
+    return "\n".join(parts)
+
+
+_COUNTRY_HEADING = re.compile(
+    r"^[ \t]*(?P<name>[A-Z][A-Za-z .'&()-]{1,40}?)[ \t]*\n(?:[ \t]*\n)*[^\n]*\bHospital name\b", re.M
+)
+
+
+def listed_network_countries(text: str) -> list[str]:
+    """Countries that have a hospital table in the providers list.
+
+    APRIL's list names, country by country, the hospitals reserved for the
+    higher plan tiers; every hospital in a country that is not listed is open
+    to all tiers.
+    """
+    section = _document_sections(text, r"providers?[-_ ]list|hospitals?[-_ ]list")
+    if not re.search(r"Hospital name", section):
+        return []
+    names: list[str] = []
+    for m in _COUNTRY_HEADING.finditer(section):
+        name = re.sub(r"\s+", " ", m.group("name")).strip()
+        if name and name.casefold() not in {n.casefold() for n in names} and not re.search(r"\bhospital\b|\bcity\b", name, re.I):
+            names.append(name)
+    return names
+
+
+_BULLET = re.compile(r"^\s*[¡•▪■●◦]\s+(?P<item>.+?)(?:\s{3,}|$)")
+
+
+def preauth_required_items(text: str) -> list[str]:
+    """The bulleted list after "If you don't get the following pre-authorised
+    we will not cover the cost" (Bupa member guide)."""
+    raw = str(text or "")
+    start = re.search(r"(?:don.?t|do\s+not)\s+get\s+the\s+following\s+pre-?\s?authori[sz]ed", raw, re.I)
+    if not start:
+        return []
+    items: list[str] = []
+    gap = 0
+    for line in raw[start.end():].splitlines()[1:60]:
+        m = _BULLET.match(line)
+        if not m:
+            if items:
+                gap += 1
+                if gap > 6:
+                    break
+            continue
+        gap = 0
+        item = re.split(r",\s*(?:for example|e\.g\.|such as)\b", m.group("item"), maxsplit=1, flags=re.I)[0]
+        item = re.sub(r"^having\s+", "", item.strip(" ;,.")).strip()
+        if item and item.casefold() not in {i.casefold() for i in items}:
+            items.append(item)
+        if len(items) >= 12:
+            break
+    return items
+
+
+def _join_items(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def destination_country(client_profile: str, listed: list[str] | None = None) -> str:
+    """The country the client lives in or is moving to, from the case profile."""
+    text = str(client_profile or "")
+    for name in listed or []:
+        if re.search(rf"\b{re.escape(name)}\b", text, re.I):
+            return name
+    m = re.search(
+        r"\b(?:moving|relocating|relocate|move|moved|living|lives|live|based|resident|residing|settling)\s+"
+        r"(?:back\s+)?(?:to|in)\s+(?:the\s+)?(?P<c>[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})",
+        text,
+    )
+    return m.group("c").strip() if m else ""
+
+
+def access_rule_limitations(rules: dict, destination: str = "") -> list[dict]:
     """Client-facing limitation rows for the rules found."""
     out: list[dict] = []
     pct = rules.get("network_copayment_pct")
     if pct:
-        where = (
-            "at hospitals the providers list reserves for higher plan tiers"
-            if rules.get("network_tiered") else "outside the plan's hospital network"
-        )
-        detail = f"Non-emergency hospitalisation {where}: {pct}% of the cost stays with you."
-        if rules.get("provider_list_supplied"):
-            detail += " Check the hospital in the providers list (included with this analysis) before any planned admission."
+        listed = rules.get("network_listed_countries") or []
+        if rules.get("network_tiered"):
+            detail = f"Non-emergency stays at hospitals the providers list reserves for higher plan tiers leave {pct}% of the cost with you."
+        else:
+            detail = f"Non-emergency hospitalisation outside the plan's hospital network: {pct}% of the cost stays with you."
+        in_list = destination and any(destination.casefold() == n.casefold() for n in listed)
+        if rules.get("network_tiered") and listed and destination and not in_list:
+            detail += (
+                f" {destination} is not on that list, so every hospital in {destination} is covered"
+                " in full (reasonable and customary costs)."
+            )
+        elif rules.get("provider_list_supplied"):
+            where = f"{destination} is on that list: check" if in_list else "Check"
+            detail += f" {where} the hospital in the providers list (included with this analysis) before any planned admission."
         else:
             detail += " Check the hospital is in the plan's network before any planned admission."
         out.append({"topic": "Hospital network", "detail": detail, "source": "plan documents"})
@@ -94,11 +201,18 @@ def access_rule_limitations(rules: dict) -> list[dict]:
             "source": "plan documents",
         })
     if rules.get("preauth_or_no_payment"):
-        nights = rules.get("preauth_inpatient_nights")
-        detail = "Treatment that needs pre-authorisation"
-        detail += f" (hospital stays of {nights}+ nights, advanced imaging, cancer treatment and the other benefits the guide marks)" if nights \
-            else " (the benefits the guide marks, such as planned hospital stays, advanced imaging and cancer treatment)"
-        detail += " may not be paid at all if it was not pre-authorised."
+        items = rules.get("preauth_items") or []
+        if items:
+            detail = f"Without pre-authorisation the cost is not covered for: {_join_items(items)}."
+        else:
+            nights = rules.get("preauth_inpatient_nights")
+            stays = f"hospital stays of {nights}+ nights" if nights else "hospital stays"
+            detail = (
+                f"Treatment the guide marks for pre-authorisation (such as {stays}, advanced imaging"
+                " and cancer treatment) may not be paid at all if it was not pre-authorised."
+            )
+        if rules.get("emergency_notice_hours"):
+            detail += f" In an emergency, ask the hospital to contact the insurer within {rules['emergency_notice_hours']} hours of admission."
         out.append({"topic": "Pre-authorisation", "detail": detail, "source": "plan documents"})
     amount = rules.get("pre_approval_threshold")
     if amount:
@@ -110,33 +224,63 @@ def access_rule_limitations(rules: dict) -> list[dict]:
     return out
 
 
+def localise_access_rows(results: list[dict], client_profile: str) -> list[dict]:
+    """Rewrite each plan's rule rows for the country the client lives in.
+
+    Telling a family moving to France that French hospitals are all covered in
+    full (because France has no restricted hospitals on the list) is more useful
+    than "check the providers list".
+    """
+    out = []
+    for result in results or []:
+        analysis = result.get("analysis") or {}
+        rules = analysis.get("access_rules") or {}
+        listed = rules.get("network_listed_countries") or []
+        destination = destination_country(client_profile, listed) if listed else ""
+        if not destination:
+            out.append(result)
+            continue
+        fresh = {row["topic"]: row for row in access_rule_limitations(rules, destination)}
+        rows = [
+            fresh.get(item.get("topic"), item)
+            if isinstance(item, dict) and item.get("source") == "plan documents" else item
+            for item in analysis.get("critical_limitations") or []
+        ]
+        out.append({**result, "analysis": {**analysis, "critical_limitations": rows}})
+    return out
+
+
 def apply_access_rules(result: dict, plan_text: str) -> dict:
     """Store the rules and put them at the top of the plan's critical limitations."""
     normalise_inpatient_scope(result, plan_text)
     drop_contradicted_limitations(result)
     ground_benefit_amounts(result, plan_text)
+    ground_shared_limits(result, plan_text)
     rules = extract_access_rules(plan_text)
     if not rules:
         return result
     result["access_rules"] = rules
     rows = access_rule_limitations(rules)
     # Drop the model's own paraphrase of the same rule so it is not listed twice.
-    duplicates = []
+    duplicates, duplicate_topics = [], []
     if rules.get("network_copayment_pct"):
         duplicates.append(r"(?:network|tier|listed)[^.;]{0,160}\b\d{1,2}\s*%|\b\d{1,2}\s*%[^.;]{0,160}(?:network|tier|remain at)")
+        duplicate_topics.append(r"\bnetwork\b|\btier\b|hospital access|providers? list")
     if rules.get("hospital_prior_approval_penalty_pct"):
         duplicates.append(r"hospitali[sz]\w*[^.;]{0,80}(?:prior|pre-?)\s?approval|(?:prior|pre-?)\s?approval[^.;]{0,80}hospitali[sz]")
     if rules.get("preauth_or_no_payment"):
         duplicates.append(r"^pre-?\s?authori[sz]ation(?! limit)")
+        duplicate_topics.append(r"pre-?\s?authori[sz]ation(?! limit)")
     if rules.get("pre_approval_threshold"):
         duplicates.append(r"pre-?\s?approval[^.;]{0,80}(?:€|eur|\$)\s*\d|(?:€|eur|\$)\s*\d[\d,.]*[^.;]{0,80}pre-?\s?approval")
 
     def is_duplicate(item) -> bool:
         if isinstance(item, dict):
-            text = f"{item.get('topic') or ''}: {item.get('detail') or ''}"
+            topic = str(item.get("topic") or "")
+            text = f"{topic}: {item.get('detail') or ''}"
         else:
-            text = str(item or "")
-        return any(re.search(p, text, re.I) for p in duplicates)
+            topic, text = "", str(item or "")
+        return any(re.search(p, text, re.I) for p in duplicates) or any(re.search(p, topic, re.I) for p in duplicate_topics)
 
     kept = [x for x in (result.get("critical_limitations") or []) if not is_duplicate(x)]
     result["critical_limitations"] = rows + kept
@@ -191,6 +335,57 @@ def drop_contradicted_limitations(result: dict) -> dict:
         if not contradicted:
             kept.append(item)
     result["critical_limitations"] = kept
+    return result
+
+
+_SHARED_CLAIM = re.compile(r",?\s*\b(?:shared|combined)\s+(?:across|between|by|among|for)\s+", re.I)
+_COUNT_BEFORE = re.compile(r"\b(?P<n>\d{1,3})\s*(?:visits?|consultations?|sessions?|treatments?|per (?:policy |insurance )?year|a year|each (?:policy )?year)", re.I)
+
+
+def ground_shared_limits(result: dict, plan_text: str) -> dict:
+    """A visit limit is per benefit unless the documents say it is shared.
+
+    Summary documents (Bupa IPID: "15 visits: specialists' consultations,
+    doctors' fees, qualified nurses, mental health, ...") list several benefits
+    after one number; the member guide gives each benefit its own 15. A
+    "shared across" claim is kept only when the documents use shared/combined/
+    in total near that number.
+    """
+    t = _flat(plan_text)
+    if not t:
+        return result
+
+    def supported(n: str) -> bool:
+        for m in re.finditer(rf"\b{n}\s*(?:visits?|consultations?|sessions?|treatments?)\b", t, re.I):
+            window = t[max(0, m.start() - 250): m.end() + 250]
+            if re.search(r"\bshared\b|\bcombined\b|\bin total\b|\baltogether\b", window, re.I):
+                return True
+        return False
+
+    def fix(text: str) -> str:
+        out, last = [], 0
+        for m in _SHARED_CLAIM.finditer(text):
+            before = text[max(0, m.start() - 90): m.start()]
+            counts = list(_COUNT_BEFORE.finditer(before))
+            if not counts or supported(counts[-1].group("n")):
+                continue
+            out.append(text[last:m.start()] + " for each of ")
+            last = m.end()
+        if not out:
+            return text
+        fixed = "".join(out) + text[last:]
+        result.setdefault("extraction_warnings", []).append(
+            f"Visit limit is per benefit in the documents, not shared: {text[:160]}"
+        )
+        return fixed
+
+    for item in result.get("critical_limitations") or []:
+        if isinstance(item, dict) and item.get("detail"):
+            item["detail"] = fix(str(item["detail"]))
+    benefits = result.get("benefits") or {}
+    for key, value in list(benefits.items()):
+        if isinstance(value, str) and _SHARED_CLAIM.search(value):
+            benefits[key] = fix(value)
     return result
 
 

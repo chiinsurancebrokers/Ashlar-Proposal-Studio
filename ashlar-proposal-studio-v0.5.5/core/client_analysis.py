@@ -16,6 +16,7 @@ from typing import Any
 from .amounts import annual_factor, parse_amount
 from .household import household_maternity_relevant, insured_people
 from .json_utils import parse_best_json_object, parse_json_objects
+from .plan_rules import localise_access_rows
 from .report_schema import ClientReportValidationError, validate_client_report
 
 
@@ -1526,7 +1527,7 @@ def generate_client_analysis(
     underwriting workflow, next steps and disclaimer are assembled from verified case
     data. This keeps four-plan output well below model output limits.
     """
-    results = results or []
+    results = localise_access_rows(results or [], client_profile)
     payload = build_grounded_case_payload(
         case_reference=case_reference,
         client_name=client_name,

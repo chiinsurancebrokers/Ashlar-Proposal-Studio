@@ -1019,7 +1019,7 @@ _LIMITATION_WEIGHTS = (
     (r"co-?payment|\b\d{1,2}\s*%[^.;]{0,80}(?:network|charge|tier|reimburs)|(?:network|tier)[^.;]{0,80}\b\d{1,2}\s*%", 100),
     (r"pre-?authori[sz]|prior approval|pre-?approv|penalt", 90),
     (r"annual maximum|day to day care|out-?patient[^.;]{0,40}(?:limit|maximum|cap)|prescri\w* medicines|drugs and dressings", 75),
-    (r"\b\d+\s+(?:consultations|visits|sessions)\b|consultations? limit", 70),
+    (r"\b\d+\s+(?:consultations|visits|sessions)\b|consultations? (?:limit|fees)|(?:specialist|doctor|gp)s?\W{0,3}(?:\w+\W{1,3})?consultations", 70),
     (r"waiting period|\b\d+[- ]month", 60),
     (r"psychiatr|mental|maternity|pregnan|cancer|dental|optical|chronic|evacuation", 50),
     (r"\bup to\b|\blimit\b|\bcap(?:ped)?\b|sub-?limit", 40),
@@ -1046,7 +1046,10 @@ def _item_weight(item: Any, text: str) -> int:
         weight = _limitation_weight(topic)
         if weight > 10:
             return weight
-    weight = _limitation_weight(text, skip=(90,) if topic else ())
+    # The headline categories (pre-authorisation, out-patient maximum, medicines
+    # caps) must be what the row is about, not a passing mention such as
+    # "within the out-patient maximum" in a nurse-visits row.
+    weight = _limitation_weight(text, skip=(90, 75) if topic else ())
     # A waiting period or limit on a benefit this plan does not cover at all
     # is not something the client can run into.
     if re.search(r"\bnot covered\b|\bexcluded\b", text, re.I):

@@ -541,3 +541,18 @@ def test_rule_rows_keep_their_label_and_passing_preauth_mentions_do_not_rank():
     assert cons[0].startswith("Pre-authorisation: Without pre-authorisation")
     assert not any(c.startswith("Rehabilitation") for c in cons)
     assert any("1,250" in c for c in cons) and any("9,400" in c for c in cons)
+
+
+def test_medicines_cap_outranks_passing_outpatient_maximum_mentions():
+    plan = {"benefits": {}, "critical_limitations": [
+        {"topic": "Pre-authorisation", "detail": "Without pre-authorisation the cost is not covered for: staying overnight in hospital.", "source": "plan documents"},
+        {"topic": "Out-patient annual maximum", "detail": "All out-patient day-to-day care benefits share an annual maximum of EUR 9,400 per person."},
+        {"topic": "Specialist/doctor consultations", "detail": "Limited to 15 consultations per policy year, within the out-patient maximum."},
+        {"topic": "Qualified nurse visits", "detail": "Limited to 15 consultations per policy year, within the out-patient maximum."},
+        {"topic": "Out-patient mental health", "detail": "Limited to 15 visits per policy year, within the out-patient maximum."},
+        {"topic": "Prescribed medicines", "detail": "Out-patient prescribed medicines and dressings are capped at EUR 1,250 per policy year."},
+    ]}
+    cons = _plan_narrative_from_verified_facts(plan)["considerations"]
+    assert [c.split(":")[0] for c in cons] == [
+        "Pre-authorisation", "Out-patient annual maximum", "Prescribed medicines", "Specialist/doctor consultations",
+    ]

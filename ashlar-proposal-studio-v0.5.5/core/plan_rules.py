@@ -95,6 +95,8 @@ def access_rule_limitations(rules: dict) -> list[dict]:
 
 def apply_access_rules(result: dict, plan_text: str) -> dict:
     """Store the rules and put them at the top of the plan's critical limitations."""
+    normalise_inpatient_scope(result, plan_text)
+    drop_contradicted_limitations(result)
     rules = extract_access_rules(plan_text)
     if not rules:
         return result
@@ -105,7 +107,7 @@ def apply_access_rules(result: dict, plan_text: str) -> dict:
     if rules.get("network_copayment_pct"):
         duplicates.append(r"(?:network|tier|listed)[^.;]{0,160}\b\d{1,2}\s*%|\b\d{1,2}\s*%[^.;]{0,160}(?:network|tier|remain at)")
     if rules.get("hospital_prior_approval_penalty_pct"):
-        duplicates.append(r"hospitali[sz]\w*[^.;]{0,80}prior approval|prior approval[^.;]{0,80}hospitali[sz]")
+        duplicates.append(r"hospitali[sz]\w*[^.;]{0,80}(?:prior|pre-?)\s?approval|(?:prior|pre-?)\s?approval[^.;]{0,80}hospitali[sz]")
     if rules.get("pre_approval_threshold"):
         duplicates.append(r"pre-?\s?approval[^.;]{0,80}(?:€|eur|\$)\s*\d|(?:€|eur|\$)\s*\d[\d,.]*[^.;]{0,80}pre-?\s?approval")
 
@@ -118,4 +120,55 @@ def apply_access_rules(result: dict, plan_text: str) -> dict:
 
     kept = [x for x in (result.get("critical_limitations") or []) if not is_duplicate(x)]
     result["critical_limitations"] = rows + kept
+    return result
+
+
+# The APRIL quote labels its hospital row "Hospitalisation Services in case of
+# Accident or Emergency", while the Table of Benefits covers all in-patient and
+# day-patient treatment (planned or emergency) subject to prior approval.
+_ACCIDENT_ONLY = re.compile(r"hospitali[sz]ation services in case of accident or emergency", re.I)
+
+
+def normalise_inpatient_scope(result: dict, plan_text: str) -> dict:
+    benefits = result.get("benefits") or {}
+    inpatient = str(benefits.get("inpatient") or "")
+    t = _flat(plan_text)
+    if (
+        _ACCIDENT_ONLY.search(inpatient)
+        and re.search(r"hospital services or day-patient treatment", t, re.I)
+        and re.search(r"hospitali[sz]ations? (?:are|is) subject to prior approval", t, re.I)
+    ):
+        benefits["inpatient"] = _ACCIDENT_ONLY.sub(
+            "Hospital services and day-patient treatment (planned or emergency; prior approval required)", inpatient
+        )
+    return result
+
+
+_SELECTED_BENEFIT_WORDS = {"maternity": r"maternity|pregnan", "dental": r"\bdental\b", "optical": r"\boptical\b"}
+
+
+def drop_contradicted_limitations(result: dict) -> dict:
+    """Remove a 'not selected / not covered' limitation for a benefit the same
+    extraction shows as included with an amount (a misread quote column)."""
+    benefits = result.get("benefits") or {}
+    covered = {
+        key for key, value in benefits.items()
+        if key in _SELECTED_BENEFIT_WORDS
+        and re.search(r"(?:€|eur|\$|£)\s?\d|\d\s?%", str(value or ""), re.I)
+        and not re.match(r"\s*not (?:covered|selected)", str(value or ""), re.I)
+    }
+    if not covered:
+        return result
+    kept = []
+    for item in result.get("critical_limitations") or []:
+        topic = str(item.get("topic") if isinstance(item, dict) else item or "")
+        detail = str(item.get("detail") if isinstance(item, dict) else "")
+        whole = f"{topic} {detail}"
+        contradicted = any(
+            re.search(_SELECTED_BENEFIT_WORDS[k], topic, re.I) and re.search(r"not selected|not (?:been )?included", whole, re.I)
+            for k in covered
+        )
+        if not contradicted:
+            kept.append(item)
+    result["critical_limitations"] = kept
     return result

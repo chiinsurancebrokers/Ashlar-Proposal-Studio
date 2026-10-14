@@ -312,3 +312,24 @@ def test_excerpt_keeps_benefit_table_pages():
     out = benefit_focused_excerpt(text, 2500)
     assert "EUR 9,400" in out and "A GUIDE TO YOUR SELECT" in out and len(out) <= 2500
     assert benefit_focused_excerpt("short", 100) == "short"
+
+
+def test_april_inpatient_scope_and_contradicted_maternity():
+    result = {
+        "benefits": {
+            "inpatient": "Hospitalisation services in case of accident or emergency: 100%; Private room",
+            "maternity": "Routine Pregnancy and Childbirth (12 months waiting period): €4,000 per pregnancy",
+        },
+        "critical_limitations": [
+            {"topic": "Maternity option not selected", "detail": "Maternity benefits not selected in this quotation."},
+            {"topic": "Pre-approval requirement", "detail": "All hospitalisations subject to pre-approval. 50% penalty applies."},
+            {"topic": "Infertility treatment", "detail": "Not covered."},
+        ],
+    }
+    plan_text = APRIL_TOB_EXCERPT + "\nHospitalisation** (Inpatient or Day-patient) Hospital Services or Day-patient treatment surgery 100%"
+    apply_access_rules(result, plan_text)
+    assert result["benefits"]["inpatient"].startswith("Hospital services and day-patient treatment (planned or emergency")
+    topics = [x["topic"] for x in result["critical_limitations"]]
+    assert "Maternity option not selected" not in topics
+    assert "Pre-approval requirement" not in topics  # duplicate of the deterministic prior-approval row
+    assert "Infertility treatment" in topics

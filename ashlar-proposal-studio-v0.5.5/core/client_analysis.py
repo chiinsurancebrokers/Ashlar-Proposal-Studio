@@ -988,9 +988,11 @@ def _clip_words(value: Any, max_words: int) -> str:
     if len(words) <= max_words:
         return text
     head = " ".join(words[:max_words])
-    boundary = head.rfind(";")
-    if boundary >= len(head) * 0.45:
-        return head[:boundary].rstrip(" ,;:") + "; …"
+    clause, sentence = head.rfind(";"), head.rfind(". ")
+    if max(clause, sentence) >= len(head) * 0.45:
+        if sentence > clause:
+            return head[:sentence + 1] + " …"
+        return head[:clause].rstrip(" ,;:") + "; …"
     return head.rstrip(" ,;:") + "…"
 
 
@@ -1031,14 +1033,30 @@ def _limitation_weight(text: str) -> int:
     return 10
 
 
+def _item_weight(item: Any, text: str) -> int:
+    """Rank by what the limitation is about (its topic); fall back to the full text.
+
+    A rehabilitation limit that mentions pre-authorisation in passing is still a
+    rehabilitation limit, not a pre-authorisation rule.
+    """
+    topic = str(item.get("topic") or "") if isinstance(item, dict) else ""
+    if topic:
+        weight = _limitation_weight(topic)
+        if weight > 10:
+            return weight
+    return _limitation_weight(text)
+
+
 def _material_limitations(items: Any, limit: int, *, max_words: int = 28) -> list[str]:
-    texts = []
+    entries: list[tuple[int, str]] = []
+    seen: set[str] = set()
     for item in items or []:
         text = _limitation_text(item)
-        if _usable_fact(text) and text not in texts:
-            texts.append(text)
-    ranked = sorted(enumerate(texts), key=lambda pair: (-_limitation_weight(pair[1]), pair[0]))
-    return [_clip_words(text, max_words) for _, text in ranked[:limit]]
+        if _usable_fact(text) and text not in seen:
+            seen.add(text)
+            entries.append((_item_weight(item, text), text))
+    ranked = sorted(enumerate(entries), key=lambda pair: (-pair[1][0], pair[0]))
+    return [_clip_words(text, max_words) for _, (_, text) in ranked[:limit]]
 
 
 def _usable_fact(value: Any) -> bool:
@@ -1407,6 +1425,7 @@ Rules:
 - Leave recommended_provider/recommended_plan empty only if a material fact needed for the decision is genuinely missing.
 - Never contradict derived_facts.
 - Never attach a waiting period to another benefit.
+- Never call a benefit "paid in full" or "without sub-limits" when the plan's critical_limitations show a cap, visit limit or combined out-patient maximum for it; say in-patient or out-patient explicitly when the two differ.
 - Max 4 reasoning bullets; each max 42 words. Keep all reason fields concise.
 
 Return ONLY this JSON shape:

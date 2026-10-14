@@ -556,3 +556,13 @@ def test_medicines_cap_outranks_passing_outpatient_maximum_mentions():
     assert [c.split(":")[0] for c in cons] == [
         "Pre-authorisation", "Out-patient annual maximum", "Prescribed medicines", "Specialist/doctor consultations",
     ]
+
+
+def test_extraction_mechanics_are_not_shown_to_the_client():
+    from core.client_analysis import client_facing_results
+    text = ("Included per the quote's Essential benefit overview (quote p.1, p.4). The Essential selection cell did not "
+            "extract as text, so confirm on the Membership Certificate. Limits: routine pregnancy €4,000 per pregnancy.")
+    results = [{"analysis": {"benefits": {"maternity": text, "dental": "80% within €1,000."}}}]
+    clean = client_facing_results(results)[0]["analysis"]["benefits"]
+    assert "extract" not in clean["maternity"] and "€4,000" in clean["maternity"]
+    assert results[0]["analysis"]["benefits"]["maternity"] == text  # stored analysis untouched

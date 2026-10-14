@@ -519,6 +519,34 @@ def apply_client_report_rules(
     return report
 
 
+_EXTRACTION_TALK = re.compile(
+    r"did not extract|not (?:rendered|extracted|readable) as text|\bicons?\b|selection cell|\bOCR\b|text layer",
+    re.I,
+)
+
+
+def _without_extraction_talk(value: Any) -> Any:
+    """Drop sentences about how a document was read ("the selection cell did not
+    extract as text") — useful to the adviser in the app, noise in a client report."""
+    if not isinstance(value, str) or not _EXTRACTION_TALK.search(value):
+        return value
+    kept = [s for s in re.split(r"(?<=[.;])\s+", value) if not _EXTRACTION_TALK.search(s)]
+    return " ".join(kept).strip() or value
+
+
+def client_facing_results(results: list[dict]) -> list[dict]:
+    out = []
+    for result in results or []:
+        analysis = result.get("analysis") or {}
+        benefits = analysis.get("benefits")
+        if not isinstance(benefits, dict) or not any(_EXTRACTION_TALK.search(str(v or "")) for v in benefits.values()):
+            out.append(result)
+            continue
+        clean = {k: _without_extraction_talk(v) for k, v in benefits.items()}
+        out.append({**result, "analysis": {**analysis, "benefits": clean}})
+    return out
+
+
 def build_comparison_matrix(
     results: list[dict],
     *,
@@ -1538,7 +1566,7 @@ def generate_client_analysis(
     underwriting workflow, next steps and disclaimer are assembled from verified case
     data. This keeps four-plan output well below model output limits.
     """
-    results = localise_access_rows(results or [], client_profile)
+    results = client_facing_results(localise_access_rows(results or [], client_profile))
     payload = build_grounded_case_payload(
         case_reference=case_reference,
         client_name=client_name,

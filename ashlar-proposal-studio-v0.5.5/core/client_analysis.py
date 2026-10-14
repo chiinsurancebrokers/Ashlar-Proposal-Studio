@@ -1122,7 +1122,7 @@ def _plan_narrative_from_verified_facts(plan: dict, *, language: str = "English"
         if len(strengths) >= 4:
             break
 
-    considerations: list[str] = _material_limitations(plan.get("critical_limitations"), 4)
+    considerations: list[str] = _material_limitations(plan.get("critical_limitations"), 4, max_words=42)
     # Then add material negative/limited benefits not already represented.
     if len(considerations) < 4:
         labels = {key: (label_gr if greek else label_en) for key, label_en, label_gr in (

@@ -458,7 +458,10 @@ def analyze_target_plan(
         deterministic_base["analysis_note"] = "AI enrichment unavailable; deterministic source facts shown."
         return _finalize(deterministic_base)
 
-    model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+    # Document extraction has its own model setting: reading a benefit table
+    # correctly needs a stronger model than the chat or plan-name helpers.
+    fallback_model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+    model = os.getenv("ANALYSIS_MODEL", "").strip() or fallback_model
     target_lock = target_plan or quote.get("quoted_plan") or "NOT YET IDENTIFIED"
 
     brochure_cap = 35000 if focused_table_context else 90000
@@ -484,7 +487,15 @@ TARGET PLAN: {target_lock}
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
-        result, raw, parse_error = _call_model(client, model, payload)
+        try:
+            result, raw, parse_error = _call_model(client, model, payload)
+        except (anthropic.NotFoundError, anthropic.PermissionDeniedError, anthropic.BadRequestError):
+            # The configured analysis model is not available on this key: use the
+            # general model rather than dropping to deterministic facts only.
+            if model == fallback_model:
+                raise
+            model = fallback_model
+            result, raw, parse_error = _call_model(client, model, payload)
     except Exception as exc:
         deterministic_base["analysis_note"] = f"AI enrichment unavailable; deterministic source facts shown. ({type(exc).__name__})"
         return _finalize(deterministic_base)
@@ -520,5 +531,6 @@ PROVIDER: {provider_label}
         except Exception:
             pass
 
+    result["analysis_model"] = model
     return _finalize(result)
 

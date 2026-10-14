@@ -998,7 +998,9 @@ def _limitation_text(item: Any) -> str:
     """'Topic: detail' so a limitation never reads as a bare 'Not covered'."""
     if isinstance(item, dict):
         topic = str(item.get("topic") or item.get("benefit") or "").strip()
-        detail = str(item.get("detail") or item.get("period") or item.get("duration") or "").strip()
+        detail = str(
+            item.get("detail") or item.get("period") or item.get("duration") or item.get("waiting_period") or ""
+        ).strip()
         if topic and detail:
             if topic.casefold() in detail.casefold():
                 return detail

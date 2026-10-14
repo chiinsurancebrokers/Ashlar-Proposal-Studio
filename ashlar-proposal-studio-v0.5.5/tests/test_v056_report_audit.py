@@ -333,3 +333,9 @@ def test_april_inpatient_scope_and_contradicted_maternity():
     assert "Maternity option not selected" not in topics
     assert "Pre-approval requirement" not in topics  # duplicate of the deterministic prior-approval row
     assert "Infertility treatment" in topics
+
+
+def test_waiting_period_key_variants():
+    from core.client_analysis import _limitation_text
+    assert _limitation_text({"benefit": "Routine Dental Treatment", "waiting_period": "3 months"}) == "Routine Dental Treatment: 3 months"
+    assert _limitation_text({"benefit": "Health screening", "duration": "10 months"}) == "Health screening: 10 months"

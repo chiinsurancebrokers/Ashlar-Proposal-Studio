@@ -36,7 +36,7 @@ def extract_access_rules(text: str) -> dict:
     ), t)
     if network:
         rules["network_copayment_pct"] = int(network.group("pct"))
-        rules["network_tiered"] = bool(re.search(r"all hospitals worldwide except those listed", t, re.I))
+        rules["network_tiered"] = bool(re.search(r"all hospitals worldwide.{0,80}?except those listed", t, re.I))
         rules["emergency_exempt"] = bool(re.search(r"except (?:in cases of )?(?:medical |life-threatening )?emergenc", t, re.I))
 
     approval = _first((

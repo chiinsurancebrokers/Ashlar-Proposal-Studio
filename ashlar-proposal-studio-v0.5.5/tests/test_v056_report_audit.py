@@ -295,3 +295,20 @@ def test_worker_reanalyses_saved_case(monkeypatch):
     assert result["analysis"]["premium"]["amount"] == "6840.91"
     assert calls["saved"]["client_analysis"] is None
     assert calls["updates"][-1]["status"] == "completed"
+
+
+def test_canonical_library_names():
+    from core.library_classify import canonical_name
+    assert canonical_name("BUPA", ["Bupa", "APRIL"]) == "Bupa"
+    assert canonical_name("select ", ["Premier", "Select"]) == "Select"
+    assert canonical_name("Allianz", ["Bupa"]) == "Allianz"
+
+
+def test_excerpt_keeps_benefit_table_pages():
+    from core.excerpt import benefit_focused_excerpt
+    intro = "".join(f"--- PAGE {i} ---\nWelcome to your plan. Our story and values. " * 40 + "\n" for i in range(2, 10))
+    table = "--- PAGE 10 ---\nTABLE OF BENEFITS\nOUT-PATIENT annual maximum EUR 9,400. Paid in full. Up to EUR 1,250 each policy year.\n" * 3
+    text = "--- LIBRARY DOCUMENT: guide.pdf [Bupa / Select / 2026 / wording] ---\n--- PAGE 1 ---\nA GUIDE TO YOUR SELECT GLOBAL HEALTH PLAN\n" + intro + table
+    out = benefit_focused_excerpt(text, 2500)
+    assert "EUR 9,400" in out and "A GUIDE TO YOUR SELECT" in out and len(out) <= 2500
+    assert benefit_focused_excerpt("short", 100) == "short"

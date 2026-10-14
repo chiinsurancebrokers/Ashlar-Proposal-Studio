@@ -69,3 +69,13 @@ TABLE_FIRST_ORDER = {"tob": 0, "brochure": 1}
 def table_first(docs: list) -> list:
     """Put Tables of Benefits ahead of brochures so a length cap never cuts them."""
     return sorted(docs, key=lambda d: TABLE_FIRST_ORDER.get(getattr(d, "doc_type", ""), 2))
+
+
+def canonical_name(value: str, existing: list[str]) -> str:
+    """Reuse the library's existing spelling ("Bupa", not "BUPA") so one
+    product never splits into two catalog entries by letter case alone."""
+    typed = str(value or "").strip()
+    for name in existing or []:
+        if str(name or "").strip().casefold() == typed.casefold():
+            return str(name).strip()
+    return typed

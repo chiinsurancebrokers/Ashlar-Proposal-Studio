@@ -24,7 +24,7 @@ from core.report_pdf import build_pdf_bytes
 from core.client_pack import collect_client_source_documents, build_client_pack_zip
 from core.email_delivery import EmailDeliveryError, email_delivery_configured, email_delivery_status, send_client_email
 from core.extract import extract_document
-from core.library_classify import guess_doc_type, product_mismatch, table_first
+from core.library_classify import canonical_name, guess_doc_type, product_mismatch, table_first
 from core.household import RELATIONSHIPS, SEXES, normalise_members
 from core.case_runner import analyze_option
 from core.plan_selector import identify_selected_plan
@@ -522,10 +522,13 @@ def provider_library_page() -> None:
                     failures: list[str] = []
                     progress = st.progress(0, text="Preparing upload…")
                     with st.status("Saving provider documents…", expanded=True) as save_status:
+                        existing_catalog = list_catalog()
+                        provider = canonical_name(provider, [c.get("provider") for c in existing_catalog])
                         sibling_products = sorted({
-                            c.get("product") for c in list_catalog()
+                            c.get("product") for c in existing_catalog
                             if str(c.get("provider") or "").strip().casefold() == provider.strip().casefold()
                         } - {None})
+                        product = canonical_name(product, sibling_products)
                         for idx, f in enumerate(files, start=1):
                             blob = f.getvalue()
                             size_mb = len(blob) / (1024 * 1024)

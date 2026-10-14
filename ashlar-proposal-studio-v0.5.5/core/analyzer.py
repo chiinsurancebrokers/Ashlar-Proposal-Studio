@@ -10,6 +10,7 @@ from .json_utils import parse_first_json_object
 from .carriers import get_carrier_adapter, carrier_metadata
 from .amounts import canonical_amount, parse_amount
 from .plan_rules import apply_access_rules
+from .excerpt import benefit_focused_excerpt
 
 
 SCHEMA_PROMPT = """You are the analysis engine inside Ashlar Proposal Studio.
@@ -474,10 +475,10 @@ TARGET PLAN: {target_lock}
 {quotation_text[:50000] or "Not supplied"}
 
 === BROCHURE / TABLE OF BENEFITS ===
-{brochure_text[:brochure_cap] or "Not supplied"}
+{benefit_focused_excerpt(brochure_text, brochure_cap) or "Not supplied"}
 
 === POLICY WORDING / SUPPORTING TERMS ===
-{wording_text[:70000] or "Not supplied"}
+{benefit_focused_excerpt(wording_text, 110000) or "Not supplied"}
 """
 
     try:
@@ -510,7 +511,7 @@ PROVIDER: {provider_label}
 {focused_table_context[:55000] or "Not supplied"}
 
 === SUPPORTING TERMS ===
-{wording_text[:25000] or "Not supplied"}
+{benefit_focused_excerpt(wording_text, 25000) or "Not supplied"}
 """
         try:
             repair, _, _ = _call_model(client, model, repair_payload)

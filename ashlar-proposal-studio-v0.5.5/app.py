@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from core.amounts import annual_premium_display
 from core.analyzer import analyze_target_plan
 from core.brochure_tables import extract_target_plan_from_pdf
 from core.chat import ask_case_agent
@@ -1879,6 +1880,7 @@ def case_workspace_page() -> None:
                 "Provider": a.get("provider") or result["provider"],
                 "Plan": a.get("plan_name") or result.get("target_plan") or "—",
                 "Premium": _premium_display(a),
+                "Annual premium": annual_premium_display(a.get("premium")),
                 "Annual limit": a.get("annual_limit", "—"),
                 "Deductible / excess": a.get("deductible_or_excess", "—"),
                 "Area": a.get("area_of_cover", "—"),

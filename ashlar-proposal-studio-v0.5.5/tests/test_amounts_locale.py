@@ -96,3 +96,14 @@ def test_premium_ranking_annualises_monthly_quotes():
     # €598 x 12 = €7,176 per year, so APRIL Essential is the cheaper annual premium.
     assert facts["lowest_premium"]["plan"].startswith("APRIL")
     assert facts["highest_premium"] == {"plan": "Bupa Global - Select", "amount": 7176.0}
+
+
+def test_annual_premium_column_values():
+    from core.amounts import annual_premium_display
+
+    assert annual_premium_display({"amount": "598", "currency": "EUR", "frequency": "monthly"}) == "EUR 7,176.00 (598 × 12)"
+    assert annual_premium_display({"amount": "570.08", "currency": "EUR", "frequency": "Monthly"}) == "EUR 6,840.96 (570.08 × 12)"
+    assert annual_premium_display({"amount": "6840.91", "currency": "EUR", "frequency": "Annual"}) == "EUR 6,840.91"
+    assert annual_premium_display({"amount": "Not specified", "currency": "EUR", "frequency": "Annual"}) == "—"
+    assert annual_premium_display({"amount": "100", "currency": "EUR", "frequency": "fortnightly"}) == "—"
+    assert annual_premium_display(None) == "—"

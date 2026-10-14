@@ -93,3 +93,28 @@ def annual_factor(frequency) -> int | None:
     if "annual" in key or "year" in key or "annum" in key or key in {"pa", "p.a.", "yearly"}:
         return 1
     return None
+
+
+def annual_premium(premium) -> tuple[str, float, float, int] | None:
+    """``(currency, annual_total, quoted_amount, factor)`` for a premium dict."""
+    if not isinstance(premium, dict):
+        return None
+    amount = parse_amount(premium.get("amount"))
+    factor = annual_factor(premium.get("frequency"))
+    if amount is None or factor is None:
+        return None
+    currency = str(premium.get("currency") or "").strip().upper()
+    return currency, round(amount * factor, 2), amount, factor
+
+
+def annual_premium_display(premium) -> str:
+    """Comparable yearly figure, e.g. ``EUR 7,176.00 (598 × 12)`` for a monthly quote."""
+    value = annual_premium(premium)
+    if value is None:
+        return "—"
+    currency, total, amount, factor = value
+    text = f"{currency} {total:,.2f}".strip()
+    if factor > 1:
+        quoted = f"{amount:,.0f}" if amount == int(amount) else f"{amount:,.2f}"
+        text += f" ({quoted} × {factor})"
+    return text

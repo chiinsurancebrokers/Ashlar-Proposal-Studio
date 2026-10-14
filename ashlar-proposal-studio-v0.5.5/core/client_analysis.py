@@ -1044,7 +1044,12 @@ def _item_weight(item: Any, text: str) -> int:
         weight = _limitation_weight(topic)
         if weight > 10:
             return weight
-    return _limitation_weight(text)
+    weight = _limitation_weight(text)
+    # A waiting period or limit on a benefit this plan does not cover at all
+    # is not something the client can run into.
+    if re.search(r"\bnot covered\b|\bexcluded\b", text, re.I):
+        weight = min(weight, 30)
+    return weight
 
 
 def _material_limitations(items: Any, limit: int, *, max_words: int = 28) -> list[str]:
@@ -1426,6 +1431,8 @@ Rules:
 - Never contradict derived_facts.
 - Never attach a waiting period to another benefit.
 - Never call a benefit "paid in full" or "without sub-limits" when the plan's critical_limitations show a cap, visit limit or combined out-patient maximum for it; say in-patient or out-patient explicitly when the two differ.
+- An advantage named for the alternative must be something the recommended plan lacks or limits more, checked against both plans' verified figures (e.g. a benefit one plan excludes, a longer day limit, a higher sub-limit). Never present a benefit both plans cover as an advantage of one of them.
+- insured_members lists who the policy covers; refer to them by relationship (e.g. "your spouse"), not as a possibility.
 - Max 4 reasoning bullets; each max 42 words. Keep all reason fields concise.
 
 Return ONLY this JSON shape:

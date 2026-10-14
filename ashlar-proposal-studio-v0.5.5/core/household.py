@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 RELATIONSHIPS = ("Spouse / partner", "Child", "Other dependant")
@@ -60,6 +61,35 @@ def _sex(value: Any) -> str:
     return "Not specified"
 
 
+def _dob(value: Any) -> str:
+    """ISO date (YYYY-MM-DD) from a date, datetime or common text format; '' if unknown."""
+    if _blank(value):
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    text = str(value).strip()[:10]
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def age_on(dob_iso: str, on: date | None = None) -> int | None:
+    if not dob_iso:
+        return None
+    born = date.fromisoformat(dob_iso)
+    today = on or date.today()
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+def is_applicant_row(raw: Any) -> bool:
+    return isinstance(raw, dict) and _text(raw.get("relationship", raw.get("Relationship"))).casefold() == "main applicant"
+
+
 def maternity_eligible(member: dict) -> bool:
     age = member.get("age")
     return member.get("sex") == "Female" and age is not None and MATERNITY_MIN_AGE <= age <= MATERNITY_MAX_AGE
@@ -72,11 +102,15 @@ def normalise_members(rows: Any) -> tuple[list[dict], list[str]]:
     for raw in rows or []:
         if not isinstance(raw, dict):
             continue
+        if is_applicant_row(raw):
+            continue  # the applicant's own details travel with the household, not as a dependant
         name = _text(raw.get("name", raw.get("Name")))
         rel_raw = _text(raw.get("relationship", raw.get("Relationship")))
         relationship = _REL_ALIASES.get(rel_raw.casefold(), rel_raw if rel_raw in RELATIONSHIPS else "")
-        age = _age(raw.get("age", raw.get("Age")))
+        dob = _dob(raw.get("dob", raw.get("Date of birth")))
+        age = age_on(dob) if dob else _age(raw.get("age", raw.get("Age")))
         sex = _sex(raw.get("sex", raw.get("Sex")))
+        nationality = _text(raw.get("nationality", raw.get("Nationality")))
         maternity = _flag(raw.get("maternity", raw.get("Maternity cover")))
         if not (name or relationship or age is not None):
             continue  # empty editor row
@@ -86,7 +120,8 @@ def normalise_members(rows: Any) -> tuple[list[dict], list[str]]:
         if relationship == "Child" and age is not None and age > CHILD_MAX_AGE:
             warnings.append(f"{label}: a child dependant must be under 25 — not added.")
             continue
-        member = {"name": name, "relationship": relationship, "age": age, "sex": sex, "maternity": False}
+        member = {"name": name, "relationship": relationship, "dob": dob, "age": age, "sex": sex,
+                  "nationality": nationality, "maternity": False}
         if maternity:
             if maternity_eligible(member):
                 member["maternity"] = True
@@ -96,11 +131,30 @@ def normalise_members(rows: Any) -> tuple[list[dict], list[str]]:
     return members, warnings
 
 
+def applicant_details(rows: Any) -> dict:
+    """Nationality / date of birth stored for the main applicant, if any."""
+    for raw in rows or []:
+        if is_applicant_row(raw):
+            return {"dob": _dob(raw.get("dob", raw.get("Date of birth"))),
+                    "nationality": _text(raw.get("nationality", raw.get("Nationality")))}
+    return {"dob": "", "nationality": ""}
+
+
+def applicant_row(*, dob: Any = None, nationality: Any = None) -> dict | None:
+    """Household entry carrying the applicant's own extra details (None when empty)."""
+    dob_iso, nat = _dob(dob), _text(nationality)
+    if not (dob_iso or nat):
+        return None
+    return {"relationship": "Main applicant", "dob": dob_iso, "nationality": nat}
+
+
 def insured_people(*, client_name: str = "", client_sex: str = "", client_age: Any = None,
                    members: Any = None) -> list[dict]:
     """Main applicant first, then dependants — the list shown in the report."""
-    main = {"name": str(client_name or "").strip(), "relationship": "Main applicant",
-            "age": _age(client_age), "sex": _sex(client_sex), "maternity": False}
+    extra = applicant_details(members)
+    age = age_on(extra["dob"]) if extra["dob"] else _age(client_age)
+    main = {"name": str(client_name or "").strip(), "relationship": "Main applicant", "dob": extra["dob"],
+            "age": age, "sex": _sex(client_sex), "nationality": extra["nationality"], "maternity": False}
     cleaned, _ = normalise_members(members)
     return [main] + cleaned
 

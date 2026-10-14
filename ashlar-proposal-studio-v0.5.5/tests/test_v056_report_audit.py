@@ -339,3 +339,21 @@ def test_waiting_period_key_variants():
     from core.client_analysis import _limitation_text
     assert _limitation_text({"benefit": "Routine Dental Treatment", "waiting_period": "3 months"}) == "Routine Dental Treatment: 3 months"
     assert _limitation_text({"benefit": "Health screening", "duration": "10 months"}) == "Health screening: 10 months"
+
+
+def test_household_dob_nationality_and_applicant_row():
+    from datetime import date
+    from core.household import age_on, applicant_row, insured_people, normalise_members
+    rows = [
+        applicant_row(dob="1990-06-21", nationality="Turkish"),
+        {"name": "Alena Polat", "relationship": "Spouse / partner", "dob": "1993-01-13", "sex": "Female",
+         "nationality": "Russian", "maternity": True},
+        {"Name": "Adel Polat", "Relationship": "Child", "Date of birth": date(2023, 6, 26), "Nationality": "Turkish"},
+    ]
+    members, warnings = normalise_members(rows)
+    assert [m["name"] for m in members] == ["Alena Polat", "Adel Polat"] and not warnings
+    assert members[0]["age"] == age_on("1993-01-13") and members[1]["dob"] == "2023-06-26"
+    people = insured_people(client_name="Sinan Polat", client_sex="Male", client_age=37, members=rows)
+    assert people[0]["nationality"] == "Turkish" and people[0]["dob"] == "1990-06-21"
+    assert people[0]["age"] == age_on("1990-06-21")  # date of birth wins over a stale age
+    assert age_on("1990-06-21", date(2026, 10, 14)) == 36

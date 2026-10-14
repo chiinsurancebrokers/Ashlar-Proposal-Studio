@@ -25,7 +25,7 @@ from core.client_pack import collect_client_source_documents, build_client_pack_
 from core.email_delivery import EmailDeliveryError, email_delivery_configured, email_delivery_status, send_client_email
 from core.extract import extract_document
 from core.library_classify import canonical_name, guess_doc_type, product_mismatch, table_first
-from core.household import RELATIONSHIPS, SEXES, normalise_members
+from core.household import RELATIONSHIPS, SEXES, applicant_details, applicant_row, normalise_members
 from core.case_runner import analyze_option
 from core.plan_selector import identify_selected_plan
 from core.quality import assess_result_quality, case_quality
@@ -780,7 +780,7 @@ def _reset_case_session() -> None:
         "client_priorities", "client_sex", "client_age", "results", "case_chat", "client_analysis",
         "loaded_case_snapshot", "client_report_reviewed", "case_archive_error",
         "client_report_job_id", "client_report_job_error", "hal_job_id", "hal_job_error", "hal_pending_question",
-        "household_base", "household_members", "include_dependants",
+        "household_base", "household_members", "include_dependants", "client_dob", "client_nationality",
     ]:
         st.session_state.pop(key, None)
     st.session_state["household_editor_v"] = st.session_state.get("household_editor_v", 0) + 1
@@ -800,9 +800,14 @@ def _restore_case_to_session(row: dict) -> None:
     st.session_state["client_sex"] = row.get("client_sex") or "Not specified"
     st.session_state["client_age"] = row.get("client_age")
     members = row.get("household_members_json") or []
+    extra = applicant_details(members)
     st.session_state["household_base"] = members
     st.session_state["household_members"] = members
-    st.session_state["include_dependants"] = bool(members)
+    st.session_state["include_dependants"] = any(
+        str(m.get("relationship") or "").casefold() != "main applicant" for m in members
+    )
+    st.session_state["client_dob"] = date.fromisoformat(extra["dob"]) if extra["dob"] else None
+    st.session_state["client_nationality"] = extra["nationality"]
     st.session_state["household_editor_v"] = st.session_state.get("household_editor_v", 0) + 1
     st.session_state["report_language"] = row.get("report_language") or "English"
     st.session_state["results"] = row.get("results_json") or []
@@ -1639,6 +1644,18 @@ def case_workspace_page() -> None:
                 placeholder="e.g. 17",
             )
         with demo_cols[2]:
+            nat_cols = st.columns(2)
+            with nat_cols[0]:
+                st.date_input(
+                    "Applicant date of birth",
+                    value=None,
+                    min_value=date(1900, 1, 1),
+                    max_value=date.today(),
+                    format="DD/MM/YYYY",
+                    key="client_dob",
+                )
+            with nat_cols[1]:
+                st.text_input("Applicant nationality", key="client_nationality", placeholder="e.g. Turkish")
             st.caption("Applicant demographics are used for relevance filtering; they do not change insurer terms or underwriting.")
 
         include_dependants = st.toggle(
@@ -1648,17 +1665,20 @@ def case_workspace_page() -> None:
         )
         if include_dependants:
             base = st.session_state.get("household_base") or []
-            columns = ["Name", "Relationship", "Age", "Sex", "Maternity cover"]
+            columns = ["Name", "Relationship", "Date of birth", "Age", "Sex", "Nationality", "Maternity cover"]
             editor_df = pd.DataFrame(
                 [
                     {
                         "Name": m.get("name") or "",
                         "Relationship": m.get("relationship") or "Child",
+                        "Date of birth": date.fromisoformat(m["dob"]) if m.get("dob") else None,
                         "Age": m.get("age"),
                         "Sex": m.get("sex") or "Not specified",
+                        "Nationality": m.get("nationality") or "",
                         "Maternity cover": bool(m.get("maternity")),
                     }
                     for m in base
+                    if str(m.get("relationship") or "").casefold() != "main applicant"
                 ],
                 columns=columns,
             )
@@ -1671,8 +1691,10 @@ def case_workspace_page() -> None:
                 column_config={
                     "Name": st.column_config.TextColumn("Name"),
                     "Relationship": st.column_config.SelectboxColumn("Relationship", options=list(RELATIONSHIPS), default="Child", required=True),
-                    "Age": st.column_config.NumberColumn("Age", min_value=0, max_value=120, step=1, help="Children must be under 25."),
+                    "Date of birth": st.column_config.DateColumn("Date of birth", format="DD/MM/YYYY", help="Age is calculated from it."),
+                    "Age": st.column_config.NumberColumn("Age", min_value=0, max_value=120, step=1, help="Children must be under 25. Leave empty when a date of birth is given."),
                     "Sex": st.column_config.SelectboxColumn("Sex", options=list(SEXES), default="Not specified"),
+                    "Nationality": st.column_config.TextColumn("Nationality"),
                     "Maternity cover": st.column_config.CheckboxColumn("Maternity cover", default=False, help="Female members aged 18–47 only."),
                 },
             )
@@ -1680,11 +1702,13 @@ def case_workspace_page() -> None:
             members, member_warnings = normalise_members(records)
             for warning in member_warnings:
                 st.warning(warning)
-            st.session_state["household_members"] = members
+            applicant = applicant_row(dob=st.session_state.get("client_dob"), nationality=st.session_state.get("client_nationality"))
+            st.session_state["household_members"] = ([applicant] if applicant else []) + members
             if members:
                 st.caption(f"{len(members) + 1} insured people on this case (applicant + {len(members)} dependant{'s' if len(members) != 1 else ''}).")
         else:
-            st.session_state["household_members"] = []
+            applicant = applicant_row(dob=st.session_state.get("client_dob"), nationality=st.session_state.get("client_nationality"))
+            st.session_state["household_members"] = [applicant] if applicant else []
 
     try:
         catalog = list_catalog()

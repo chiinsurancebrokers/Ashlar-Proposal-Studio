@@ -165,8 +165,9 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
             rel = str(m.get("relationship") or "")
             rel = REL_GREEK.get(rel, rel) if greek else rel
             age = "" if m.get("age") in (None, "") else f", {m.get('age')}"
+            nat = f", {m.get('nationality')}" if m.get("nationality") else ""
             name = str(m.get("name") or "").strip()
-            lines.append(f"{name} — {rel}{age}" if name else f"{rel}{age}")
+            lines.append(f"{name} — {rel}{age}{nat}" if name else f"{rel}{age}{nat}")
         _text(s, title, .55, 3.85, 5.9, .4, 15, True, PURPLE)
         _text(s, "\n".join(lines[:6]), .55, 4.3, 5.9, 1.9, 12, False, INK)
     _rect(s, 6.75, 1.35, 5.95, 4.85, WHITE, True, BORDER)

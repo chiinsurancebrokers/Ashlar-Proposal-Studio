@@ -45,7 +45,7 @@ def _labels(language: str) -> dict:
             "preferred": "Προτεινόμενη επιλογή", "alternative": "Ισχυρή εναλλακτική", "extras": "Επιλογή με ευρύτερα πρόσθετα", "budget": "Οικονομικότερη επιλογή", "important_next": "Σημαντικές επισημάνσεις & επόμενα βήματα",
             "important": "Σημαντικές επισημάνσεις", "next": "Επόμενα βήματα", "notice": "Σημαντική σημείωση",
             "sources": "Επίσημα έγγραφα ασφαλιστικών εταιρειών", "sources_note": "Τα παρακάτω brochures / Tables of Benefits είναι τα έγγραφα των ασφαλιστικών εταιρειών που συνοδεύουν την ανάλυση. Οι προσωρινοί σύνδεσμοι ενδέχεται να λήξουν.", "open_doc": "Άνοιγμα εγγράφου",
-            "members": "Ασφαλιζόμενα μέλη", "member_cols": ("Όνομα", "Σχέση", "Ηλικία"),
+            "members": "Ασφαλιζόμενα μέλη", "member_cols": ("Όνομα", "Σχέση", "Ημ. γέννησης", "Ηλικία", "Υπηκοότητα"),
             "doc_types": {"brochure": "Φυλλάδιο", "tob": "Πίνακας παροχών", "wording": "Όροι ασφάλισης", "underwriting": "Οδηγός ανάληψης κινδύνου", "supporting": "Συνοδευτικό έγγραφο"},
         }
     return {
@@ -56,7 +56,7 @@ def _labels(language: str) -> dict:
         "preferred": "Recommended option", "alternative": "Strong alternative", "extras": "Broader extras option", "budget": "Budget option", "important_next": "Important considerations & next steps",
         "important": "Important considerations", "next": "Next steps", "notice": "Important notice",
         "sources": "Official provider documents", "sources_note": "The brochures / Tables of Benefits below are the insurer documents supplied with this analysis. Temporary web links may expire.", "open_doc": "Open document",
-        "members": "Insured members", "member_cols": ("Name", "Relationship", "Age"),
+        "members": "Insured members", "member_cols": ("Name", "Relationship", "Date of birth", "Age", "Nationality"),
         "doc_types": {"brochure": "Brochure", "tob": "Table of Benefits", "wording": "Policy wording", "underwriting": "Underwriting guide", "supporting": "Supporting document"},
     }
 
@@ -148,12 +148,16 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
         rows = [[_p(c, head_style) for c in lab["member_cols"]]]
         for m in members:
             rel = str(m.get("relationship") or "")
+            dob = str(m.get("dob") or "")
+            dob_text = f"{dob[8:10]}/{dob[5:7]}/{dob[0:4]}" if len(dob) == 10 else "—"
             rows.append([
                 _p(str(m.get("name") or "—"), Body),
                 _p(REL_GREEK.get(rel, rel) if greek_rel else rel, Body),
+                _p(dob_text, Body),
                 _p("—" if m.get("age") in (None, "") else str(m.get("age")), Body),
+                _p(str(m.get("nationality") or "—"), Body),
             ])
-        mem_tbl = Table(rows, colWidths=[90*mm, 70*mm, 25*mm], hAlign="LEFT")
+        mem_tbl = Table(rows, colWidths=[70*mm, 55*mm, 35*mm, 20*mm, 45*mm], hAlign="LEFT")
         mem_tbl.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), LIGHT), ("GRID", (0,0), (-1,-1), .35, BORDER),
             ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5),

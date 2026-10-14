@@ -6,7 +6,7 @@ import os
 import re
 
 
-from .json_utils import parse_first_json_object
+from .json_utils import parse_best_json_object, parse_first_json_object
 from .carriers import get_carrier_adapter, carrier_metadata
 from .amounts import canonical_amount, parse_amount
 from .plan_rules import apply_access_rules
@@ -385,20 +385,38 @@ def _needs_repair(result: dict) -> bool:
     return missing_headlines >= 2 or missing_benefits >= 5
 
 
+_RESULT_KEYS = ("provider", "plan_name", "premium", "benefits", "critical_limitations", "waiting_periods")
+_CONCISE_RETRY = (
+    "\n\nIMPORTANT: a previous answer to this request was too long and was cut off before the JSON closed. "
+    "Return the complete JSON object only. Keep each benefit value under 60 words, at most 12 "
+    "critical_limitations and at most 10 source_evidence rows."
+)
+
+
 def _call_model(client, model: str, payload: str) -> tuple[dict | None, str, str | None]:
-    response = client.messages.create(
-        model=model,
-        max_tokens=7000,
-        messages=[{"role": "user", "content": payload}],
-    )
-    raw = "".join(
-        block.text for block in response.content
-        if getattr(block, "type", None) == "text"
-    ).strip()
+    """One extraction call. A stronger model writes longer answers, so the output
+    budget is generous and a cut-off answer is retried once in concise form —
+    a truncated JSON would otherwise parse to a nested fragment with no benefits."""
+    raw = ""
+    for attempt in range(2):
+        response = client.messages.create(
+            model=model,
+            max_tokens=16000,
+            messages=[{"role": "user", "content": payload if attempt == 0 else payload + _CONCISE_RETRY}],
+        )
+        raw = "".join(
+            block.text for block in response.content
+            if getattr(block, "type", None) == "text"
+        ).strip()
+        if getattr(response, "stop_reason", None) != "max_tokens":
+            break
     try:
-        return parse_first_json_object(raw), raw, None
+        result = parse_best_json_object(raw, required_keys=_RESULT_KEYS)
     except json.JSONDecodeError as exc:
         return None, raw, str(exc)
+    if not any(k in result for k in ("benefits", "premium", "plan_name")):
+        return None, raw, "Model response did not contain the analysis object."
+    return result, raw, None
 
 
 def analyze_target_plan(

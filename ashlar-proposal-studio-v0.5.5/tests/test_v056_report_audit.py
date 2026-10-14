@@ -394,3 +394,22 @@ def test_ungrounded_evacuation_limitation_row_is_dropped():
     ]}
     ground_benefit_amounts(r, doc)
     assert [x["topic"] for x in r["critical_limitations"]] == ["Organ transplant limit"]
+
+
+def test_analysis_call_retries_cut_off_answer_and_picks_outer_object():
+    from types import SimpleNamespace
+    from core.analyzer import _call_model
+
+    full = '{"provider": "APRIL", "plan_name": "ESSENTIAL", "premium": {"amount": "6840.91"}, "benefits": {"inpatient": "100%"}}'
+    calls = []
+
+    class Messages:
+        def create(self, **kw):
+            calls.append(kw)
+            if len(calls) == 1:  # cut off: only the nested premium object is complete
+                return SimpleNamespace(stop_reason="max_tokens", content=[SimpleNamespace(type="text", text='{"provider": "APRIL", "premium": {"amount": "6840.91"}, "benefits": {"inpatient": "100% ...')])
+            return SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text=full)])
+
+    result, raw, err = _call_model(SimpleNamespace(messages=Messages()), "claude-opus-5-5", "PROMPT")
+    assert err is None and result["benefits"]["inpatient"] == "100%" and len(calls) == 2
+    assert calls[0]["max_tokens"] == 16000 and "cut off" in calls[1]["messages"][0]["content"]

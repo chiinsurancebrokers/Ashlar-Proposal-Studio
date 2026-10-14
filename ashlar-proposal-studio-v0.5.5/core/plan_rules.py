@@ -56,6 +56,16 @@ def extract_access_rules(text: str) -> dict:
         if lead:
             rules["pre_approval_lead_days"] = int(lead.group("days"))
 
+    # "Benefit may/will not be paid unless pre-authorisation has been provided"
+    # (Bupa): no fixed penalty, the claim itself is at risk.
+    if not rules.get("hospital_prior_approval_penalty_pct") and re.search(
+        r"benefits? (?:will|may) not be paid unless pre-?\s?authori[sz]ation", t, re.I
+    ):
+        rules["preauth_or_no_payment"] = True
+        stay = re.search(r"in-patient stays of (?P<n>\d+) nights or more need pre-?\s?authori[sz]ation", t, re.I)
+        if stay:
+            rules["preauth_inpatient_nights"] = int(stay.group("n"))
+
     if re.search(r"LIBRARY DOCUMENT: [^\n]*(?:providers?|hospitals?)[-_ ]list", str(text or ""), re.I):
         rules["provider_list_supplied"] = True
     return rules
@@ -83,6 +93,13 @@ def access_rule_limitations(rules: dict) -> list[dict]:
             "detail": f"Every hospitalisation needs the insurer's prior approval; without it the reimbursement is reduced by {penalty}%.",
             "source": "plan documents",
         })
+    if rules.get("preauth_or_no_payment"):
+        nights = rules.get("preauth_inpatient_nights")
+        detail = "Treatment that needs pre-authorisation"
+        detail += f" (hospital stays of {nights}+ nights, advanced imaging, cancer treatment and the other benefits the guide marks)" if nights \
+            else " (the benefits the guide marks, such as planned hospital stays, advanced imaging and cancer treatment)"
+        detail += " may not be paid at all if it was not pre-authorised."
+        out.append({"topic": "Pre-authorisation", "detail": detail, "source": "plan documents"})
     amount = rules.get("pre_approval_threshold")
     if amount:
         detail = f"Any treatment costing more than €{amount} needs pre-approval"
@@ -108,6 +125,8 @@ def apply_access_rules(result: dict, plan_text: str) -> dict:
         duplicates.append(r"(?:network|tier|listed)[^.;]{0,160}\b\d{1,2}\s*%|\b\d{1,2}\s*%[^.;]{0,160}(?:network|tier|remain at)")
     if rules.get("hospital_prior_approval_penalty_pct"):
         duplicates.append(r"hospitali[sz]\w*[^.;]{0,80}(?:prior|pre-?)\s?approval|(?:prior|pre-?)\s?approval[^.;]{0,80}hospitali[sz]")
+    if rules.get("preauth_or_no_payment"):
+        duplicates.append(r"^pre-?\s?authori[sz]ation(?! limit)")
     if rules.get("pre_approval_threshold"):
         duplicates.append(r"pre-?\s?approval[^.;]{0,80}(?:€|eur|\$)\s*\d|(?:€|eur|\$)\s*\d[\d,.]*[^.;]{0,80}pre-?\s?approval")
 

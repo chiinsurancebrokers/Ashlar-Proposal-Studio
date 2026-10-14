@@ -357,3 +357,16 @@ def test_household_dob_nationality_and_applicant_row():
     assert people[0]["nationality"] == "Turkish" and people[0]["dob"] == "1990-06-21"
     assert people[0]["age"] == age_on("1990-06-21")  # date of birth wins over a stale age
     assert age_on("1990-06-21", date(2026, 10, 14)) == 36
+
+
+def test_bupa_preauthorisation_rule_states_the_consequence():
+    text = ("In-patient stays of 5 nights or more need pre-authorisation. "
+            "Please contact us for pre-authorisation before proceeding with treatment. "
+            "Benefit may not be paid unless pre-authorisation has been provided.")
+    result = {"critical_limitations": [{"topic": "Pre-authorisation mandatory for multiple benefits", "detail": "Pre-authorisation required."}]}
+    apply_access_rules(result, text)
+    rows = result["critical_limitations"]
+    assert rows[0]["topic"] == "Pre-authorisation" and "not be paid" in rows[0]["detail"] and "5+ nights" in rows[0]["detail"]
+    assert len(rows) == 1
+    # APRIL's fixed 50% penalty rule is not replaced by the generic one.
+    assert "preauth_or_no_payment" not in extract_access_rules(APRIL_TOB_EXCERPT)

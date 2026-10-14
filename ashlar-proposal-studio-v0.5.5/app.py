@@ -26,6 +26,7 @@ from core.email_delivery import EmailDeliveryError, email_delivery_configured, e
 from core.extract import extract_document
 from core.library_classify import guess_doc_type, product_mismatch, table_first
 from core.household import RELATIONSHIPS, SEXES, normalise_members
+from core.case_runner import analyze_option
 from core.plan_selector import identify_selected_plan
 from core.quality import assess_result_quality, case_quality
 from core.carriers import get_carrier_adapter
@@ -1806,101 +1807,18 @@ def case_workspace_page() -> None:
                 manual_brochure_text, manual_brochure_pdfs = _extract_uploaded(slot["manual_brochure"])
                 manual_wording_text, manual_wording_pdfs = _extract_uploaded(slot["manual_wording"])
 
-                lib_brochure_text = ""
-                lib_wording_text = ""
-                library_plan_docs = []
-                library_docs = []
-                if slot["library_row"]:
-                    row = slot["library_row"]
-                    try:
-                        library_docs = get_documents(row["provider"], row["product"], row["version"])
-                    except LibraryStorageError as exc:
-                        st.error(f"Could not load {row['provider']} Library sources: {exc}")
-                        library_docs = []
-                    lib_brochure_text, lib_wording_text, library_plan_docs = _extract_library_documents(library_docs)
-
-                brochure_text = "\n\n".join(x for x in [lib_brochure_text, manual_brochure_text] if x)
-                wording_text = "\n\n".join(x for x in [lib_wording_text, manual_wording_text] if x)
-
-                selection = identify_selected_plan(
-                    quotation_text,
-                    provider_label=slot["label"],
-                    manual_override=slot["target_override"],
-                )
-                target_plan = (selection.get("plan_name") or "").strip()
-                carrier_adapter = get_carrier_adapter(slot["label"], quotation_text)
-
-                focused_blocks: list[str] = []
-                focused_rows: list[dict] = []
-                # Geometric target-column isolation is appropriate for true multi-plan
-                # tables such as IMG and Cigna. Bupa Select is a single-plan guide,
-                # while NOW SimpleCare quotations contain an applicant-specific benefit
-                # schedule; forcing those documents through a multi-column lens can
-                # mislabel neighbouring values as benefit names.
-                if target_plan and carrier_adapter.benefit_strategy == "multi_plan_table":
-                    for library_doc in library_plan_docs:
-                        try:
-                            with materialize_document(library_doc) as path:
-                                focused = extract_target_plan_from_pdf(path, target_plan)
-                        except LibraryStorageError as exc:
-                            st.warning(f"Could not read {library_doc.original_filename}: {exc}")
-                            continue
-                        if focused.rows:
-                            focused_blocks.append(
-                                f"--- SOURCE FILE: {library_doc.original_filename} ---\n{focused.to_prompt_context()}"
-                            )
-                            focused_rows.extend([
-                                {"source_file": library_doc.original_filename, **row.__dict__}
-                                for row in focused.rows
-                            ])
-
-                    for filename, blob in manual_brochure_pdfs + manual_wording_pdfs:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                            tmp.write(blob)
-                            tmp_path = tmp.name
-                        try:
-                            focused = extract_target_plan_from_pdf(tmp_path, target_plan)
-                            if focused.rows:
-                                focused_blocks.append(f"--- SOURCE FILE: {filename} ---\n{focused.to_prompt_context()}")
-                                focused_rows.extend([{"source_file": filename, **row.__dict__} for row in focused.rows])
-                        finally:
-                            Path(tmp_path).unlink(missing_ok=True)
-
-                analysis = analyze_target_plan(
-                    provider_label=slot["label"],
-                    target_plan=target_plan,
+                result_row, option_warnings = analyze_option(
+                    label=slot["label"],
                     quotation_text=quotation_text,
-                    brochure_text=brochure_text,
-                    wording_text=wording_text,
-                    focused_table_context="\n\n".join(focused_blocks),
+                    library_row=slot["library_row"],
+                    target_override=slot["target_override"],
+                    underwriting_override=slot.get("underwriting_override") or "",
+                    manual_brochure_text=manual_brochure_text,
+                    manual_wording_text=manual_wording_text,
+                    manual_pdfs=manual_brochure_pdfs + manual_wording_pdfs,
                 )
-                if slot.get("underwriting_override"):
-                    analysis.setdefault("underwriting", {})["basis"] = slot["underwriting_override"]
-                    analysis.setdefault("broker_overrides", {})["underwriting_basis"] = slot["underwriting_override"]
-
-                result_row = {
-                    "provider": slot["label"],
-                    "library_source": slot["library_row"],
-                    "library_files": [d.original_filename for d in library_docs],
-                    "library_documents": [
-                        {
-                            "id": d.id,
-                            "provider": d.provider,
-                            "product": d.product,
-                            "version": d.version,
-                            "doc_type": d.doc_type,
-                            "filename": d.original_filename,
-                            "sha256": d.sha256,
-                        }
-                        for d in library_docs
-                    ],
-                    "plan_selection": selection,
-                    "target_plan": target_plan,
-                    "underwriting_override": slot.get("underwriting_override"),
-                    "focused_rows": focused_rows,
-                    "analysis": analysis,
-                }
-                result_row["quality"] = assess_result_quality(result_row)
+                for warning in option_warnings:
+                    st.warning(warning)
                 all_results.append(result_row)
                 progress.progress(idx / len(active), text=f"Completed {slot['label']}")
 

@@ -239,3 +239,59 @@ def test_pdf_lists_insured_members():
     pdf = build_pdf_bytes(client_analysis=analysis, results=[], language="English")
     text = "".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf)).pages)
     assert "Insured members" in text and "Ayse Polat" in text and "Deniz Polat" in text
+
+
+# 11. Shared case runner: wrong-product guide skipped, quote text kept for re-analysis.
+class _Doc:
+    def __init__(self, id, product, doc_type, filename, text):
+        self.id, self.provider, self.product, self.version = id, "Bupa", product, "2026"
+        self.doc_type, self.original_filename, self.extracted_text, self.sha256 = doc_type, filename, text, id
+
+
+def test_case_runner_skips_premier_guide_and_keeps_quote(monkeypatch):
+    import core.case_runner as runner
+    docs = [
+        _Doc("ipid", "Select", "supporting", "DAC Select Health Plan IPID EN OCT26.pdf",
+             "--- PAGE 1 --- Insurance Product Information Document Product: Select Global Health Plan"),
+        _Doc("prem", "Select", "wording", "DAC Premier Health Plan Membership Guide EN OCT26.pdf",
+             "--- PAGE 1 --- A GUIDE TO YOUR PREMIER GLOBAL HEALTH PLAN"),
+    ]
+    monkeypatch.setattr(runner, "get_documents", lambda *a: docs)
+    monkeypatch.setattr(runner, "list_catalog", lambda: [
+        {"provider": "Bupa", "product": "Premier"}, {"provider": "Bupa", "product": "Select"}])
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    row, warnings = runner.analyze_option(
+        label="BUPA SELECT", quotation_text=BUPA_QUOTE,
+        library_row={"provider": "Bupa", "product": "Select", "version": "2026"},
+        underwriting_override="Full Medical Underwriting",
+    )
+    assert row["library_files"] == ["DAC Select Health Plan IPID EN OCT26.pdf"]
+    assert row["excluded_library_documents"][0]["id"] == "prem"
+    assert any("Premier" in w for w in warnings)
+    assert row["quotation_text"] == BUPA_QUOTE
+    assert row["analysis"]["premium"]["amount"] == "7176"
+
+    args = runner.reanalysis_inputs(row)
+    assert args["quotation_text"] == BUPA_QUOTE and args["underwriting_override"] == "Full Medical Underwriting"
+
+
+def test_worker_reanalyses_saved_case(monkeypatch):
+    import worker
+    saved = {"id": "c1", "results_json": [{"provider": "ARIL MYHEALTH ESSENTIAL", "quotation_text": "Annual Premium* €6840,91 Incl Tax",
+                                            "plan_selection": {"method": "broker_override", "plan_name": "ESSENTIAL"},
+                                            "library_source": None, "underwriting_override": "Full Medical Underwriting"}],
+             "client_analysis_json": {"old": True}}
+    calls = {}
+    monkeypatch.setattr(worker, "load_case", lambda cid: saved)
+    monkeypatch.setattr(worker, "update_job", lambda jid, **f: calls.setdefault("updates", []).append(f))
+    monkeypatch.setattr(worker, "save_case_snapshot", lambda **kw: calls.setdefault("saved", kw))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    worker.process_case_analysis({"id": "j1", "case_id": "c1",
+                                  "request_json": {"labels": {"ARIL MYHEALTH ESSENTIAL": "APRIL MYHEALTH ESSENTIAL"}}})
+    result = calls["saved"]["results"][0]
+    assert result["provider"] == "APRIL MYHEALTH ESSENTIAL"
+    assert result["target_plan"] == "ESSENTIAL"
+    assert result["analysis"]["premium"]["amount"] == "6840.91"
+    assert calls["saved"]["client_analysis"] is None
+    assert calls["updates"][-1]["status"] == "completed"

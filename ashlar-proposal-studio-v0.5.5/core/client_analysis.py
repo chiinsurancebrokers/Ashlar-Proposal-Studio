@@ -1005,7 +1005,7 @@ def _limitation_text(item: Any) -> str:
             item.get("detail") or item.get("period") or item.get("duration") or item.get("waiting_period") or ""
         ).strip()
         if topic and detail:
-            if topic.casefold() in detail.casefold():
+            if detail.casefold().startswith(topic.casefold()):
                 return detail
             return f"{topic}: {detail}"
         return detail or topic
@@ -1027,9 +1027,9 @@ _LIMITATION_WEIGHTS = (
 )
 
 
-def _limitation_weight(text: str) -> int:
+def _limitation_weight(text: str, skip: tuple[int, ...] = ()) -> int:
     for pattern, weight in _LIMITATION_WEIGHTS:
-        if re.search(pattern, text, re.I):
+        if weight not in skip and re.search(pattern, text, re.I):
             return weight
     return 10
 
@@ -1038,14 +1038,15 @@ def _item_weight(item: Any, text: str) -> int:
     """Rank by what the limitation is about (its topic); fall back to the full text.
 
     A rehabilitation limit that mentions pre-authorisation in passing is still a
-    rehabilitation limit, not a pre-authorisation rule.
+    rehabilitation limit, not a pre-authorisation rule: when a row has a topic of
+    its own, a passing mention of pre-authorisation in its detail does not lift it.
     """
     topic = str(item.get("topic") or "") if isinstance(item, dict) else ""
     if topic:
         weight = _limitation_weight(topic)
         if weight > 10:
             return weight
-    weight = _limitation_weight(text)
+    weight = _limitation_weight(text, skip=(90,) if topic else ())
     # A waiting period or limit on a benefit this plan does not cover at all
     # is not something the client can run into.
     if re.search(r"\bnot covered\b|\bexcluded\b", text, re.I):

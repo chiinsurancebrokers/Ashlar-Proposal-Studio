@@ -527,3 +527,17 @@ def test_visit_limit_is_per_benefit_unless_documents_say_shared():
     r2 = {"critical_limitations": [{"topic": "Therapies", "detail": "10 sessions per year, shared across physiotherapy and osteopathy."}]}
     ground_shared_limits(r2, "Physiotherapy and osteopathy: 10 sessions per year in total (combined).")
     assert "shared across" in r2["critical_limitations"][0]["detail"]
+
+
+def test_rule_rows_keep_their_label_and_passing_preauth_mentions_do_not_rank():
+    plan = {"benefits": {}, "critical_limitations": [
+        {"topic": "Pre-authorisation", "detail": "Without pre-authorisation the cost is not covered for: staying overnight in hospital.", "source": "plan documents"},
+        {"topic": "Rehabilitation", "detail": "Limited to 30 days per policy year. Requires pre-authorisation."},
+        {"topic": "Out-patient annual cap", "detail": "All out-patient day-to-day care is capped at EUR 9,400 per person per year."},
+        {"topic": "Prescribed medicines", "detail": "Up to EUR 1,250 per policy year."},
+        {"topic": "Consultation visits", "detail": "15 consultations per policy year for each of specialists and nurses."},
+    ]}
+    cons = _plan_narrative_from_verified_facts(plan)["considerations"]
+    assert cons[0].startswith("Pre-authorisation: Without pre-authorisation")
+    assert not any(c.startswith("Rehabilitation") for c in cons)
+    assert any("1,250" in c for c in cons) and any("9,400" in c for c in cons)

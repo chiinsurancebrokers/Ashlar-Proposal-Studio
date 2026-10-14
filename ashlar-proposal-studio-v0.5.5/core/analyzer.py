@@ -42,6 +42,7 @@ NON-NEGOTIABLE RULES:
 - Keep diagnostics/advanced imaging separate from preventive or wellness benefits. MRI, CT and PET are diagnostic imaging, not wellness benefits.
 - A visit or consultation limit applies to each benefit separately unless the document says it is shared, combined or in total. Summary documents (IPID, key facts) that list several benefits after one number are listing per-benefit limits.
 - A providers/hospital list that names hospitals country by country restricts only the countries it lists; do not tell the client to verify hospitals in a country the list does not mention.
+- critical_limitations: one limit per item with a short topic naming that limit (e.g. "Prescribed medicines", "Consultation visits"), detail in at most 35 words. Split a group of separate caps into separate items rather than one long list.
 
 Return ONLY valid JSON:
 {

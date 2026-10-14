@@ -34,3 +34,7 @@ revoke all on table public.analysis_cases from anon, authenticated;
 -- v0.4.8 applicant relevance fields for existing installations
 alter table public.analysis_cases add column if not exists client_sex text;
 alter table public.analysis_cases add column if not exists client_age integer;
+
+-- v0.5.6: insured dependants (spouse / children) entered with the case.
+alter table public.analysis_cases
+  add column if not exists household_members_json jsonb not null default '[]'::jsonb;

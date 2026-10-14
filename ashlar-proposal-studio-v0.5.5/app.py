@@ -24,6 +24,8 @@ from core.report_pdf import build_pdf_bytes
 from core.client_pack import collect_client_source_documents, build_client_pack_zip
 from core.email_delivery import EmailDeliveryError, email_delivery_configured, email_delivery_status, send_client_email
 from core.extract import extract_document
+from core.library_classify import guess_doc_type, product_mismatch, table_first
+from core.household import RELATIONSHIPS, SEXES, normalise_members
 from core.plan_selector import identify_selected_plan
 from core.quality import assess_result_quality, case_quality
 from core.carriers import get_carrier_adapter
@@ -61,6 +63,7 @@ st.set_page_config(
 )
 
 DOC_TYPES = {
+    "Auto-detect per file (recommended)": "auto",
     "Brochure / multi-plan Table of Benefits": "brochure",
     "Table of Benefits": "tob",
     "Policy Wording / Member Guide": "wording",
@@ -68,6 +71,7 @@ DOC_TYPES = {
     "Supporting document": "supporting",
 }
 TABLE_DOC_TYPES = {"brochure", "tob"}
+DOC_TYPE_LABELS = {v: k for k, v in DOC_TYPES.items() if v != "auto"}
 
 
 # -----------------------------------------------------------------------------
@@ -350,7 +354,7 @@ def _extract_library_documents(docs):
     wording_texts: list[str] = []
     plan_pdf_docs = []
 
-    for doc in docs:
+    for doc in table_first(list(docs)):
         text = (doc.extracted_text or "").strip()
         if not text:
             try:
@@ -517,17 +521,57 @@ def provider_library_page() -> None:
                     failures: list[str] = []
                     progress = st.progress(0, text="Preparing upload…")
                     with st.status("Saving provider documents…", expanded=True) as save_status:
+                        sibling_products = sorted({
+                            c.get("product") for c in list_catalog()
+                            if str(c.get("provider") or "").strip().casefold() == provider.strip().casefold()
+                        } - {None})
                         for idx, f in enumerate(files, start=1):
                             blob = f.getvalue()
                             size_mb = len(blob) / (1024 * 1024)
                             st.write(f"**{idx}/{len(files)} — {f.name}** ({size_mb:.1f} MB)")
+                            progress.progress((idx - 1) / max(len(files), 1), text=f"Reading {f.name}…")
+
+                            # Read the file first: its text decides the document type and
+                            # catches a guide filed under the wrong product.
+                            suffix = Path(f.name).suffix or ".bin"
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                                tmp.write(blob)
+                                tmp_path = tmp.name
+                            try:
+                                indexed = extract_document(tmp_path, f.name)
+                            except Exception as exc:
+                                indexed = None
+                                st.warning(f"Text extraction failed before saving: {exc}")
+                            finally:
+                                Path(tmp_path).unlink(missing_ok=True)
+                            text = indexed.text if indexed is not None and indexed.ok else ""
+
+                            other_product = product_mismatch(product, text, sibling_products)
+                            if other_product:
+                                msg = (
+                                    f"{f.name}: the title page is for {provider} {other_product}, not {product}. "
+                                    f"Not saved — upload it under {other_product}, or use the {product} document."
+                                )
+                                failures.append(msg)
+                                st.error(msg)
+                                continue
+
+                            doc_type = DOC_TYPES[doc_type_label]
+                            if doc_type == "auto":
+                                guessed = guess_doc_type(f.name, text)
+                                doc_type = guessed or "brochure"
+                                if guessed:
+                                    st.write(f"Detected type: {DOC_TYPE_LABELS.get(doc_type, doc_type)}")
+                                else:
+                                    st.warning("Type not recognised — saved as Brochure. Change it if this is a wording or Table of Benefits.")
+
                             progress.progress((idx - 1) / max(len(files), 1), text=f"Uploading {f.name} to Supabase…")
                             try:
                                 doc, was_created = save_provider_document(
                                     provider=provider,
                                     product=product,
                                     version=version,
-                                    doc_type=DOC_TYPES[doc_type_label],
+                                    doc_type=doc_type,
                                     filename=f.name,
                                     content=blob,
                                     effective_from=effective_from,
@@ -543,22 +587,16 @@ def provider_library_page() -> None:
                             duplicates += int(not was_created)
                             if was_created:
                                 st.write("✓ Original document stored. Indexing text for reuse…")
-                                suffix = Path(f.name).suffix or ".bin"
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                                    tmp.write(blob)
-                                    tmp_path = tmp.name
                                 try:
-                                    indexed = extract_document(tmp_path, f.name)
-                                    if indexed.ok:
+                                    if indexed is not None and indexed.ok:
                                         cache_document_text(doc.id, indexed.text)
                                         st.write(f"✓ Parsed text cached ({len(indexed.text):,} characters).")
                                     else:
-                                        cache_document_text(doc.id, None, indexed.error)
-                                        st.warning(f"Document saved, but text extraction reported: {indexed.error}")
+                                        error = indexed.error if indexed is not None else "extraction failed"
+                                        cache_document_text(doc.id, None, error)
+                                        st.warning(f"Document saved, but text extraction reported: {error}")
                                 except Exception as exc:
                                     st.warning(f"Document saved, but text-cache indexing could not be persisted: {exc}")
-                                finally:
-                                    Path(tmp_path).unlink(missing_ok=True)
                             else:
                                 st.info("Exact duplicate detected — existing Library copy reused.")
                             progress.progress(idx / max(len(files), 1), text=f"Completed {idx}/{len(files)}")
@@ -717,6 +755,7 @@ def _persist_current_case(*, silent: bool = False, status: str = "analyzed") -> 
             case_chat=st.session_state.get("case_chat") or [],
             client_analysis=st.session_state.get("client_analysis"),
             status=status,
+            household_members=st.session_state.get("household_members") or [],
         )
     except CaseArchiveError as exc:
         if not silent:
@@ -737,8 +776,10 @@ def _reset_case_session() -> None:
         "client_priorities", "client_sex", "client_age", "results", "case_chat", "client_analysis",
         "loaded_case_snapshot", "client_report_reviewed", "case_archive_error",
         "client_report_job_id", "client_report_job_error", "hal_job_id", "hal_job_error", "hal_pending_question",
+        "household_base", "household_members", "include_dependants",
     ]:
         st.session_state.pop(key, None)
+    st.session_state["household_editor_v"] = st.session_state.get("household_editor_v", 0) + 1
     # Clear dynamic option widgets from the prior case so a new workspace starts clean.
     for key in list(st.session_state.keys()):
         if key.startswith(("library_choice_", "target_", "uw_", "label_", "q_", "b_", "w_")):
@@ -754,6 +795,11 @@ def _restore_case_to_session(row: dict) -> None:
     st.session_state["client_priorities"] = row.get("client_priorities") or ""
     st.session_state["client_sex"] = row.get("client_sex") or "Not specified"
     st.session_state["client_age"] = row.get("client_age")
+    members = row.get("household_members_json") or []
+    st.session_state["household_base"] = members
+    st.session_state["household_members"] = members
+    st.session_state["include_dependants"] = bool(members)
+    st.session_state["household_editor_v"] = st.session_state.get("household_editor_v", 0) + 1
     st.session_state["report_language"] = row.get("report_language") or "English"
     st.session_state["results"] = row.get("results_json") or []
     st.session_state["case_chat"] = row.get("case_chat_json") or []
@@ -1241,6 +1287,7 @@ def render_client_deliverable(results: list[dict]) -> None:
                         results=results,
                         language=st.session_state.get("report_language", "English"),
                         strict=True,
+                        household_members=st.session_state.get("household_members") or [],
                     )
                     validate_client_report(generated, results)
             except ClientReportValidationError as exc:
@@ -1589,6 +1636,51 @@ def case_workspace_page() -> None:
             )
         with demo_cols[2]:
             st.caption("Applicant demographics are used for relevance filtering; they do not change insurer terms or underwriting.")
+
+        include_dependants = st.toggle(
+            "Add dependants to this case (spouse / partner, children)",
+            key="include_dependants",
+            help="Insured family members are listed in the client report and decide whether maternity cover is relevant.",
+        )
+        if include_dependants:
+            base = st.session_state.get("household_base") or []
+            columns = ["Name", "Relationship", "Age", "Sex", "Maternity cover"]
+            editor_df = pd.DataFrame(
+                [
+                    {
+                        "Name": m.get("name") or "",
+                        "Relationship": m.get("relationship") or "Child",
+                        "Age": m.get("age"),
+                        "Sex": m.get("sex") or "Not specified",
+                        "Maternity cover": bool(m.get("maternity")),
+                    }
+                    for m in base
+                ],
+                columns=columns,
+            )
+            edited = st.data_editor(
+                editor_df,
+                key=f"household_editor_{st.session_state.get('household_editor_v', 0)}",
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Name": st.column_config.TextColumn("Name"),
+                    "Relationship": st.column_config.SelectboxColumn("Relationship", options=list(RELATIONSHIPS), default="Child", required=True),
+                    "Age": st.column_config.NumberColumn("Age", min_value=0, max_value=120, step=1, help="Children must be under 25."),
+                    "Sex": st.column_config.SelectboxColumn("Sex", options=list(SEXES), default="Not specified"),
+                    "Maternity cover": st.column_config.CheckboxColumn("Maternity cover", default=False, help="Female members aged 18–47 only."),
+                },
+            )
+            records = edited.astype(object).where(pd.notna(edited), None).to_dict("records")
+            members, member_warnings = normalise_members(records)
+            for warning in member_warnings:
+                st.warning(warning)
+            st.session_state["household_members"] = members
+            if members:
+                st.caption(f"{len(members) + 1} insured people on this case (applicant + {len(members)} dependant{'s' if len(members) != 1 else ''}).")
+        else:
+            st.session_state["household_members"] = []
 
     try:
         catalog = list_catalog()

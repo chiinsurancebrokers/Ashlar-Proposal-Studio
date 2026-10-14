@@ -55,6 +55,7 @@ def process_report(job: dict) -> None:
         results=results,
         language=row.get("report_language") or "English",
         strict=True,
+        household_members=row.get("household_members_json") or [],
     )
     update_job(jid, progress_stage="Validating complete client report")
     validate_client_report(report, results)

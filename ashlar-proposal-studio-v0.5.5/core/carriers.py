@@ -61,7 +61,7 @@ def _premium_from_anchored_patterns(text: str) -> dict | None:
         r"(?:final\s+total\s+premium|total\s+annual\s+premium|annual\s+premium|yearly\s+premium|premium\s+per\s+annum|total\s+premium)"
         r"[^\d€$£A-Z]{0,60}(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)",
         r"(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)\s*"
-        r"(?:annual(?:ly)?|per\s+annum|per\s+year|indicative\s+per\s+year)",
+        r"(?:annual(?:ly)?|per\s+annum|per\s+year|a\s+year|indicative\s+per\s+year)",
         r"\bpremium\b[^\n\r]{0,45}(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)",
     ]
     candidates: list[tuple[float, str, str]] = []
@@ -300,6 +300,16 @@ def bupa_quote_facts(text: str) -> dict:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
+    if not premium:
+        # Monthly-payment quotes print the yearly total on the next line:
+        # "EUR 598 Monthly / EUR 7176 a year". Lock the yearly figure so the
+        # comparison is annual-to-annual.
+        premium = re.search(
+            r"Selected\s+plan\s*:.{0,160}?"
+            r"(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)\s*(?:a\s+year|per\s+year|per\s+annum|annually|/\s*year)",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
     if premium:
         facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
         facts["quote_currency"] = facts["premium"]["currency"]
@@ -324,7 +334,7 @@ def bupa_quote_facts(text: str) -> dict:
 
     hints = facts.setdefault("benefit_hints", {})
     covered_block = re.search(r"What's\s+covered\s*:\s*(?P<body>.*?)What's\s+not\s+covered\s*:", text, flags=re.IGNORECASE | re.DOTALL)
-    excluded_block = re.search(r"What's\s+not\s+covered\s*:\s*(?P<body>.*?)Important\s+documents", text, flags=re.IGNORECASE | re.DOTALL)
+    excluded_block = re.search(r"What's\s+not\s+covered\s*:\s*(?P<body>.*?)(?:Important\s+documents|\Z)", text, flags=re.IGNORECASE | re.DOTALL)
     covered = (covered_block.group("body") if covered_block else "").casefold()
     excluded = (excluded_block.group("body") if excluded_block else "").casefold()
     if "admitted" in covered or "hospital" in covered:

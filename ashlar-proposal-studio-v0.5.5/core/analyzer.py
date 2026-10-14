@@ -9,6 +9,7 @@ import re
 from .json_utils import parse_first_json_object
 from .carriers import get_carrier_adapter, carrier_metadata
 from .amounts import canonical_amount, parse_amount
+from .plan_rules import apply_access_rules
 
 
 SCHEMA_PROMPT = """You are the analysis engine inside Ashlar Proposal Studio.
@@ -257,10 +258,16 @@ def _apply_deterministic_facts(result: dict, provider_label: str, quotation_text
     if quote.get("waiting_periods"):
         result["waiting_periods"] = quote["waiting_periods"]
 
+    # Quote-summary hints are applicant-specific for what was NOT bought, so an
+    # exclusion hint always wins. A generic "covered" hint ("see the membership
+    # guide") must not overwrite the detailed limits the model read from the
+    # guide itself; it only fills a benefit the extraction left empty.
     hints = quote.get("benefit_hints") or {}
     benefits = result.setdefault("benefits", {})
     for key, value in hints.items():
-        if value:
+        if not value:
+            continue
+        if _missing(benefits.get(key)) or re.search(r"\bnot covered\b|\bexcluded\b", str(value), re.I):
             benefits[key] = value
 
     annual = _find_row(rows, "annual overall benefit maximum")
@@ -425,6 +432,8 @@ def analyze_target_plan(
         result = _apply_deterministic_facts(
             result, provider_label, quotation_text, focused_table_context
         )
+        # Network / prior-approval rules come from the full plan documents.
+        result = apply_access_rules(result, "\n\n".join([brochure_text or "", wording_text or ""]))
         result.setdefault("provider", provider_label)
         result.setdefault("plan_name", target_plan or quote.get("quoted_plan") or None)
         result.setdefault("target_plan_found", bool(target_plan or quote.get("quoted_plan") or focused_table_context))

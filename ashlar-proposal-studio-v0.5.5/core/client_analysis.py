@@ -14,6 +14,7 @@ from typing import Any
 
 
 from .amounts import annual_factor, parse_amount
+from .household import household_maternity_relevant, insured_people
 from .json_utils import parse_best_json_object, parse_json_objects
 from .report_schema import ClientReportValidationError, validate_client_report
 
@@ -71,13 +72,37 @@ def _normalise_sex(value: str | None) -> str:
     return "unspecified"
 
 
-def maternity_relevant(*, client_sex: str = "", client_priorities: str = "") -> bool:
-    """Maternity is client-facing only for a female applicant.
+_HOUSEHOLD_MATERNITY_SIGNAL = re.compile(
+    r"\b(?:spouse|wife|husband|partner|couple|family|families|pregnan\w*|maternity|expecting|baby|newborn)\b"
+    r"|σύζυγ|συζυγ|οικογένει|οικογενει|ζευγάρ|ζευγαρ|εγκυμ|μητρότητ|μητροτητ|μωρ",
+    re.I,
+)
 
-    A partner's potential pregnancy is not an insured benefit of a male applicant's
-    individual policy, so the report must not turn it into a recommendation factor.
+
+def maternity_relevant(
+    *,
+    client_sex: str = "",
+    client_priorities: str = "",
+    client_profile: str = "",
+    household_members: list | None = None,
+    client_age: int | None = None,
+) -> bool:
+    """Is maternity a benefit someone on this policy can actually use?
+
+    A single male applicant cannot claim maternity, so it stays out of his report.
+    It is relevant when the applicant is female, or when the case insures a spouse
+    or partner (a family / couple policy), or when the client raised pregnancy or
+    maternity themselves. A quote that includes maternity for a family must show it.
     """
-    return _normalise_sex(client_sex) == "female"
+    if _normalise_sex(client_sex) == "female":
+        return True
+    # Entered dependants are the authority: a female member of child-bearing age
+    # (or one flagged for maternity) makes it relevant; a household without one does not.
+    from_household = household_maternity_relevant(client_sex=client_sex, client_age=client_age, members=household_members)
+    if from_household is not None:
+        return from_household
+    context = f"{client_profile or ''} {client_priorities or ''}"
+    return bool(_HOUSEHOLD_MATERNITY_SIGNAL.search(context))
 
 
 def client_facing_deductible(value: Any) -> str:
@@ -250,7 +275,9 @@ def _positive_waiting_period_or_usage(text: Any) -> bool:
     return any(token in key for token in (
         "waiting period", "annual limit", "sub-limit", "sublimit", "deductible",
         "not covered", "excluded", "limited to", "per visit", "per year",
-        "pre-authorisation", "preauthorization", "network", "area of cover",
+        "pre-authorisation", "preauthorization", "pre-authorization", "prior approval",
+        "pre-approval", "preapproval", "co-payment", "copayment", "penalty", "capped",
+        "network", "area of cover",
     ))
 
 
@@ -364,13 +391,15 @@ def apply_client_report_rules(
     client_age: int | None = None,
     client_priorities: str = "",
     language: str = "English",
+    client_profile: str = "",
+    household_members: list | None = None,
 ) -> dict:
     """Deterministic editorial guardrail after narrative generation.
 
     The LLM can write prose, but it cannot override applicant relevance or turn
     zero-cost-sharing into a material comparison point.
     """
-    relevant_maternity = maternity_relevant(client_sex=client_sex, client_priorities=client_priorities)
+    relevant_maternity = maternity_relevant(client_sex=client_sex, client_priorities=client_priorities, client_profile=client_profile, household_members=household_members, client_age=client_age)
     has_cost_share = _has_nonzero_core_cost_share(results)
 
     # Applicant relevance: remove maternity from a male applicant's client-facing narrative.
@@ -471,6 +500,19 @@ def apply_client_report_rules(
         if ass.get(key) and not _waiting_period_claim_supported(ass.get(key), results):
             ass[key] = ""
 
+    # The extras/budget routes are only useful when they point somewhere other
+    # than the recommendation; repeating the same plan three times adds nothing.
+    def _option_key(provider: Any, plan: Any) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", f"{provider or ''} {plan or ''}".casefold()).strip()
+
+    recommended = _option_key(ass.get("recommended_provider"), ass.get("recommended_plan"))
+    if recommended:
+        for slot in ("extras", "budget"):
+            if _option_key(ass.get(f"{slot}_provider"), ass.get(f"{slot}_plan")) == recommended:
+                ass[f"{slot}_provider"] = ""
+                ass[f"{slot}_plan"] = ""
+                ass[f"{slot}_reason"] = ""
+
     report["client_sex"] = _normalise_sex(client_sex)
     report["client_age"] = client_age
     return report
@@ -482,6 +524,8 @@ def build_comparison_matrix(
     client_sex: str = "",
     client_age: int | None = None,
     client_priorities: str = "",
+    client_profile: str = "",
+    household_members: list | None = None,
 ) -> list[dict]:
     """Build broker/client comparison rows without LLM interpretation."""
     plan_names = [plan_display_name(r) for r in results]
@@ -508,7 +552,7 @@ def build_comparison_matrix(
         "Underwriting",
     )
     for key, label in BENEFIT_ORDER:
-        if key == "maternity" and not maternity_relevant(client_sex=client_sex, client_priorities=client_priorities):
+        if key == "maternity" and not maternity_relevant(client_sex=client_sex, client_priorities=client_priorities, client_profile=client_profile, household_members=household_members, client_age=client_age):
             continue
         add_row(label, lambda a, k=key: (a.get("benefits") or {}).get(k), "Benefits")
     return rows
@@ -586,6 +630,7 @@ def build_grounded_case_payload(
     client_sex: str = "",
     client_age: int | None = None,
     results: list[dict] = None,
+    household_members: list | None = None,
 ) -> dict:
     results = results or []
     plans = []
@@ -617,13 +662,19 @@ def build_grounded_case_payload(
         "client_priorities": client_priorities or "Not supplied",
         "client_sex": _normalise_sex(client_sex),
         "client_age": client_age,
-        "maternity_relevant": maternity_relevant(client_sex=client_sex, client_priorities=client_priorities),
+        "maternity_relevant": maternity_relevant(client_sex=client_sex, client_priorities=client_priorities, client_profile=client_profile, household_members=household_members, client_age=client_age),
+        "insured_members": [
+            {k: m[k] for k in ("relationship", "age", "sex", "maternity")}
+            for m in insured_people(client_sex=client_sex, client_age=client_age, members=household_members)
+        ],
         "plans": plans,
         "comparison_matrix": build_comparison_matrix(
             results,
             client_sex=client_sex,
             client_age=client_age,
             client_priorities=client_priorities,
+            client_profile=client_profile,
+            household_members=household_members,
         ),
     }
 
@@ -813,6 +864,7 @@ def _compact_repair_payload(payload: dict) -> dict:
         "client_sex": payload.get("client_sex"),
         "client_age": payload.get("client_age"),
         "maternity_relevant": payload.get("maternity_relevant"),
+        "insured_members": payload.get("insured_members") or [],
         "derived_facts": _derived_decision_facts(payload),
         "plans": [],
     }
@@ -924,14 +976,67 @@ Required JSON schema shape:
 
 
 def _clip_words(value: Any, max_words: int) -> str:
-    """Compact long extracted clauses without changing their substantive wording."""
+    """Compact long extracted clauses without changing their substantive wording.
+
+    Cuts at the last clause boundary (";") inside the word budget when there is
+    one, so a figure is never left dangling as "max 7…" or "€15,000…".
+    """
     text = re.sub(r"\s+", " ", str(value or "").strip())
     if not text:
         return ""
     words = text.split()
     if len(words) <= max_words:
         return text
-    return " ".join(words[:max_words]).rstrip(" ,;:") + "…"
+    head = " ".join(words[:max_words])
+    boundary = head.rfind(";")
+    if boundary >= len(head) * 0.45:
+        return head[:boundary].rstrip(" ,;:") + "; …"
+    return head.rstrip(" ,;:") + "…"
+
+
+def _limitation_text(item: Any) -> str:
+    """'Topic: detail' so a limitation never reads as a bare 'Not covered'."""
+    if isinstance(item, dict):
+        topic = str(item.get("topic") or item.get("benefit") or "").strip()
+        detail = str(item.get("detail") or item.get("period") or item.get("duration") or "").strip()
+        if topic and detail:
+            if topic.casefold() in detail.casefold():
+                return detail
+            return f"{topic}: {detail}"
+        return detail or topic
+    return str(item or "").strip()
+
+
+# Most material first: what changes the client's out-of-pocket cost or whether a
+# claim is paid at all, then caps on everyday care, then waiting periods, then
+# exclusions of core benefits. Generic exclusion lists rank last.
+_LIMITATION_WEIGHTS = (
+    (r"co-?payment|\b\d{1,2}\s*%[^.;]{0,80}(?:network|charge|tier|reimburs)|(?:network|tier)[^.;]{0,80}\b\d{1,2}\s*%", 100),
+    (r"pre-?authori[sz]|prior approval|pre-?approv|penalt", 90),
+    (r"annual maximum|day to day care|out-?patient[^.;]{0,40}(?:limit|maximum|cap)|prescri\w* medicines|drugs and dressings", 75),
+    (r"\b\d+\s+(?:consultations|visits|sessions)\b|consultations? limit", 70),
+    (r"waiting period|\b\d+[- ]month", 60),
+    (r"psychiatr|mental|maternity|pregnan|cancer|dental|optical|chronic|evacuation", 50),
+    (r"\bup to\b|\blimit\b|\bcap(?:ped)?\b|sub-?limit", 40),
+    (r"out-?of-?network|reasonable and customary", 30),
+)
+
+
+def _limitation_weight(text: str) -> int:
+    for pattern, weight in _LIMITATION_WEIGHTS:
+        if re.search(pattern, text, re.I):
+            return weight
+    return 10
+
+
+def _material_limitations(items: Any, limit: int, *, max_words: int = 28) -> list[str]:
+    texts = []
+    for item in items or []:
+        text = _limitation_text(item)
+        if _usable_fact(text) and text not in texts:
+            texts.append(text)
+    ranked = sorted(enumerate(texts), key=lambda pair: (-_limitation_weight(pair[1]), pair[0]))
+    return [_clip_words(text, max_words) for _, text in ranked[:limit]]
 
 
 def _usable_fact(value: Any) -> bool:
@@ -992,25 +1097,23 @@ def _plan_narrative_from_verified_facts(plan: dict, *, language: str = "English"
         if len(strengths) >= 4:
             break
 
-    considerations: list[str] = []
-    # Prefer explicit critical limitations from extraction.
-    for item in plan.get("critical_limitations") or []:
-        if isinstance(item, dict):
-            detail = item.get("detail") or item.get("topic")
-        else:
-            detail = item
-        if _usable_fact(detail):
-            considerations.append(_clip_words(detail, 28))
-        if len(considerations) >= 4:
-            break
+    considerations: list[str] = _material_limitations(plan.get("critical_limitations"), 4)
     # Then add material negative/limited benefits not already represented.
     if len(considerations) < 4:
-        for key in ("outpatient", "mental_health", "dental", "optical", "preventive", "chronic_conditions"):
+        labels = {key: (label_gr if greek else label_en) for key, label_en, label_gr in (
+            ("outpatient", "Out-patient", "Εξωνοσοκομειακά"),
+            ("mental_health", "Mental health", "Ψυχική υγεία"),
+            ("dental", "Dental", "Οδοντιατρικά"),
+            ("optical", "Optical", "Οπτικά"),
+            ("preventive", "Preventive / wellness", "Πρόληψη"),
+            ("chronic_conditions", "Chronic conditions", "Χρόνιες παθήσεις"),
+        )}
+        for key, label in labels.items():
             value = str(benefits.get(key) or "")
             if not _usable_fact(value):
                 continue
             if re.search(r"\bnot covered\b|\bexcluded\b|\blimited\b|waiting|\bcap(?:ped)?\b|sub[- ]?limit", value, re.I):
-                bullet = _clip_words(value, 28)
+                bullet = _clip_words(f"{label}: {value}", 28)
                 if bullet and bullet not in considerations:
                     considerations.append(bullet)
             if len(considerations) >= 4:
@@ -1206,19 +1309,18 @@ def _compact_decision_payload(payload: dict) -> dict:
                 key: _clip_words(benefits.get(key), 34)
                 for key in (
                     "inpatient", "outpatient", "cancer", "chronic_conditions",
-                    "mental_health", "dental", "optical", "diagnostics_imaging",
+                    "mental_health", "maternity", "dental", "optical", "diagnostics_imaging",
                     "preventive", "evacuation_repatriation"
                 )
                 if _usable_fact(benefits.get(key))
+                and (key != "maternity" or payload.get("maternity_relevant"))
             },
             "waiting_periods": [
-                _clip_words(x.get("detail") if isinstance(x, dict) else x, 22)
-                for x in (plan.get("waiting_periods") or [])[:5]
+                _clip_words(_limitation_text(x), 22)
+                for x in (plan.get("waiting_periods") or [])[:6]
+                if _usable_fact(_limitation_text(x))
             ],
-            "critical_limitations": [
-                _clip_words((x.get("detail") or x.get("topic")) if isinstance(x, dict) else x, 26)
-                for x in (plan.get("critical_limitations") or [])[:5]
-            ],
+            "critical_limitations": _material_limitations(plan.get("critical_limitations"), 6, max_words=26),
         })
     return out
 
@@ -1264,7 +1366,9 @@ Write ONLY these compact client-facing sections from the supplied verified case 
 Rules:
 - Use ONLY supplied case facts. Do not add product knowledge.
 - Compare the FINAL QUOTED CONFIGURATION. A selected optional module is not inferior merely because another insurer bundles the same benefit in its base plan.
-- Applicant relevance is mandatory. Maternity/pregnancy/newborn may be discussed only for a female applicant.
+- Applicant relevance is mandatory. Maternity/pregnancy/newborn may be discussed only when maternity_relevant is true (female applicant, or a spouse/partner is insured).
+- Pre-authorisation / prior-approval rules, penalties and out-of-network co-payments are material: when a plan has one, it belongs in important_considerations.
+- A sub-limit inside a combined cap (e.g. prescribed medicines inside an out-patient annual maximum) must be stated with the cap; never call a capped benefit 'paid in full' without its cap.
 - Do not create a cost-sharing comparison when core quoted cover has no non-zero cost share.
 - MRI/CT/PET belong to diagnostics/imaging, never wellness.
 - Important considerations are client usage/benefit issues only; never imply broker work is incomplete.
@@ -1297,7 +1401,7 @@ Rules:
 - Explain why the recommended option fits THIS client better than the strongest competitor.
 - Explicitly acknowledge material competing advantages such as lower premium, higher annual limit, higher outpatient ceiling, diagnostics, waiting periods or fewer sub-limits.
 - Identify a strongest alternative when one exists.
-- Also identify a broader-extras option and a budget option when relevant; these are practical routes, not rankings.
+- Also identify a broader-extras option and a budget option when relevant; these are practical routes, not rankings. Fill them ONLY when they name a different plan from recommended_plan; otherwise leave them empty.
 - Leave recommended_provider/recommended_plan empty only if a material fact needed for the decision is genuinely missing.
 - Never contradict derived_facts.
 - Never attach a waiting period to another benefit.
@@ -1386,6 +1490,7 @@ def generate_client_analysis(
     results: list[dict] = None,
     language: str = "English",
     strict: bool = False,
+    household_members: list | None = None,
 ) -> dict:
     """v0.5.4 modular report generator.
 
@@ -1402,6 +1507,7 @@ def generate_client_analysis(
         client_sex=client_sex,
         client_age=client_age,
         results=results,
+        household_members=household_members,
     )
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
@@ -1411,9 +1517,11 @@ def generate_client_analysis(
         out["comparison_matrix"] = payload["comparison_matrix"]
         out["client_name"] = payload["client_name"]
         out["case_reference"] = payload["case_reference"]
+        out["insured_members"] = insured_people(client_name=client_name, client_sex=client_sex, client_age=client_age, members=household_members)
         return apply_client_report_rules(
             out, results=results, client_sex=client_sex, client_age=client_age,
-            client_priorities=client_priorities, language=language
+            client_priorities=client_priorities, language=language, client_profile=client_profile,
+            household_members=household_members,
         )
 
     model = os.getenv("CLIENT_ANALYSIS_MODEL", os.getenv("CLAUDE_MODEL", "claude-sonnet-5"))
@@ -1504,6 +1612,7 @@ def generate_client_analysis(
     out["case_reference"] = payload["case_reference"]
     out["client_profile"] = payload["client_profile"]
     out["client_priorities"] = payload["client_priorities"]
+    out["insured_members"] = insured_people(client_name=client_name, client_sex=client_sex, client_age=client_age, members=household_members)
     out = apply_client_report_rules(
         out,
         results=results,
@@ -1511,6 +1620,8 @@ def generate_client_analysis(
         client_age=client_age,
         client_priorities=client_priorities,
         language=language,
+        client_profile=client_profile,
+        household_members=household_members,
     )
     if strict:
         validate_client_report(out, results)

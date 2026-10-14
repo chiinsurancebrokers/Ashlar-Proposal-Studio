@@ -19,6 +19,7 @@ from reportlab.platypus import (
 )
 
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative
+from .household import REL_GREEK
 
 NAVY = colors.HexColor("#0C1A2A")
 NAVY2 = colors.HexColor("#12243A")
@@ -44,6 +45,8 @@ def _labels(language: str) -> dict:
             "preferred": "Προτεινόμενη επιλογή", "alternative": "Ισχυρή εναλλακτική", "extras": "Επιλογή με ευρύτερα πρόσθετα", "budget": "Οικονομικότερη επιλογή", "important_next": "Σημαντικές επισημάνσεις & επόμενα βήματα",
             "important": "Σημαντικές επισημάνσεις", "next": "Επόμενα βήματα", "notice": "Σημαντική σημείωση",
             "sources": "Επίσημα έγγραφα ασφαλιστικών εταιρειών", "sources_note": "Τα παρακάτω brochures / Tables of Benefits είναι τα έγγραφα των ασφαλιστικών εταιρειών που συνοδεύουν την ανάλυση. Οι προσωρινοί σύνδεσμοι ενδέχεται να λήξουν.", "open_doc": "Άνοιγμα εγγράφου",
+            "members": "Ασφαλιζόμενα μέλη", "member_cols": ("Όνομα", "Σχέση", "Ηλικία"),
+            "doc_types": {"brochure": "Φυλλάδιο", "tob": "Πίνακας παροχών", "wording": "Όροι ασφάλισης", "underwriting": "Οδηγός ανάληψης κινδύνου", "supporting": "Συνοδευτικό έγγραφο"},
         }
     return {
         "subtitle": "Independent plan comparison and reasoned advisory view", "footer": "Independent comparative analysis",
@@ -53,6 +56,8 @@ def _labels(language: str) -> dict:
         "preferred": "Recommended option", "alternative": "Strong alternative", "extras": "Broader extras option", "budget": "Budget option", "important_next": "Important considerations & next steps",
         "important": "Important considerations", "next": "Next steps", "notice": "Important notice",
         "sources": "Official provider documents", "sources_note": "The brochures / Tables of Benefits below are the insurer documents supplied with this analysis. Temporary web links may expire.", "open_doc": "Open document",
+        "members": "Insured members", "member_cols": ("Name", "Relationship", "Age"),
+        "doc_types": {"brochure": "Brochure", "tob": "Table of Benefits", "wording": "Policy wording", "underwriting": "Underwriting guide", "supporting": "Supporting document"},
     }
 
 
@@ -136,6 +141,25 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     profile = client_analysis.get("client_profile")
     if profile and profile != "Not supplied":
         story += [_p(lab["profile"], H2), _p(profile, Body)]
+    members = client_analysis.get("insured_members") or []
+    if len(members) > 1:
+        greek_rel = lab["members"] != "Insured members"
+        head_style = ParagraphStyle("MemTH", parent=Small, fontName=FONT_BOLD)
+        rows = [[_p(c, head_style) for c in lab["member_cols"]]]
+        for m in members:
+            rel = str(m.get("relationship") or "")
+            rows.append([
+                _p(str(m.get("name") or "—"), Body),
+                _p(REL_GREEK.get(rel, rel) if greek_rel else rel, Body),
+                _p("—" if m.get("age") in (None, "") else str(m.get("age")), Body),
+            ])
+        mem_tbl = Table(rows, colWidths=[90*mm, 70*mm, 25*mm], hAlign="LEFT")
+        mem_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), LIGHT), ("GRID", (0,0), (-1,-1), .35, BORDER),
+            ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5),
+            ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        story += [_p(lab["members"], H2), mem_tbl, Spacer(1, 3*mm)]
     story += [_p(lab["exec"], H2), _p(client_analysis.get("executive_summary") or "", Body), PageBreak()]
 
     # Plans
@@ -229,7 +253,8 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
             story += [_p(provider, H2)]
             for src in docs_for_provider:
                 filename = str(src.get("filename") or "Provider document")
-                doc_type = str(src.get("doc_type") or "document").replace("_", " ").title()
+                raw_type = str(src.get("doc_type") or "document")
+                doc_type = lab["doc_types"].get(raw_type, raw_type.replace("_", " ").title())
                 plan_name = str(src.get("plan_name") or "").strip()
                 prefix = f"{doc_type} - {plan_name}" if plan_name else doc_type
                 url = str(src.get("url") or "").strip()

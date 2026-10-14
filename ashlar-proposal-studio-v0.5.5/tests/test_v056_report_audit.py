@@ -370,3 +370,27 @@ def test_bupa_preauthorisation_rule_states_the_consequence():
     assert len(rows) == 1
     # APRIL's fixed 50% penalty rule is not replaced by the generic one.
     assert "preauth_or_no_payment" not in extract_access_rules(APRIL_TOB_EXCERPT)
+
+
+def test_evacuation_figures_are_grounded_and_quote_fills_evacuation():
+    from core.carriers import generic_quote_facts
+    from core.plan_rules import ground_benefit_amounts
+    doc = ("TRANSPLANT SERVICES Each condition up to EUR 250,000. " + "Kidney dialysis paid in full. " * 40 +
+           "TRANSPORTATION/TRAVEL Evacuation covers you. LIVING ALLOWANCE following an evacuation EUREUR 125125 per day.")
+    r = {"benefits": {"evacuation_repatriation": "Evacuation paid in full. Living allowance EUR 125 per day. Each condition up to EUR 250,000."}}
+    ground_benefit_amounts(r, doc)
+    assert "250,000" not in r["benefits"]["evacuation_repatriation"]
+    assert "EUR 125" in r["benefits"]["evacuation_repatriation"]
+    q = "Emergency Medical Evacuation or Repatriation\n   100%   100%\n costs\n Repatriation of mortal remains   100%   100%"
+    assert generic_quote_facts(q)["benefit_hints"]["evacuation_repatriation"].startswith("Emergency medical evacuation or repatriation: 100%")
+
+
+def test_ungrounded_evacuation_limitation_row_is_dropped():
+    from core.plan_rules import ground_benefit_amounts
+    doc = "TRANSPLANT SERVICES Each condition up to EUR 250,000. " + "Kidney dialysis paid in full. " * 40 + "TRANSPORTATION Evacuation paid in full."
+    r = {"benefits": {}, "critical_limitations": [
+        {"topic": "Evacuation and repatriation limit per condition", "detail": "Each condition up to EUR 250,000."},
+        {"topic": "Organ transplant limit", "detail": "Each condition up to EUR 250,000."},
+    ]}
+    ground_benefit_amounts(r, doc)
+    assert [x["topic"] for x in r["critical_limitations"]] == ["Organ transplant limit"]

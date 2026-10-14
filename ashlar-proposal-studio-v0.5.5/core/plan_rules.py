@@ -114,6 +114,7 @@ def apply_access_rules(result: dict, plan_text: str) -> dict:
     """Store the rules and put them at the top of the plan's critical limitations."""
     normalise_inpatient_scope(result, plan_text)
     drop_contradicted_limitations(result)
+    ground_benefit_amounts(result, plan_text)
     rules = extract_access_rules(plan_text)
     if not rules:
         return result
@@ -190,4 +191,72 @@ def drop_contradicted_limitations(result: dict) -> dict:
         if not contradicted:
             kept.append(item)
     result["critical_limitations"] = kept
+    return result
+
+
+_MONEY_IN_CLAUSE = re.compile(r"(?:€|eur|usd|us\$|\$|£|gbp)\s?(\d[\d,.]*\d|\d)", re.I)
+_GROUNDING_KEYWORDS = {"evacuation_repatriation": r"evacuat|repatriat|transport"}
+
+
+def ground_benefit_amounts(result: dict, plan_text: str, window: int = 800) -> dict:
+    """Drop a money figure the model attached to the wrong benefit.
+
+    A clause is kept only if its amount appears in the plan documents within
+    ``window`` characters of that benefit's own wording. (Bupa: the transplant
+    limit "each condition up to EUR 250,000" sits above the transport section
+    and was read as an evacuation limit.)
+    """
+    benefits = result.get("benefits") or {}
+    text = str(plan_text or "")
+    if not text:
+        return result
+
+    def grounded(clause: str, anchors: list[int]) -> bool:
+        for amount in (a.replace(",", "").replace(".", "") for a in _MONEY_IN_CLAUSE.findall(clause)):
+            # Some PDFs extract every glyph twice ("EUREUR 125125"); accept that form too.
+            spots = [
+                m.start() for m in re.finditer(r"\d[\d,.]*", text)
+                if m.group(0).replace(",", "").replace(".", "") in (amount, amount * 2)
+            ]
+            if not any(abs(s - a) <= window for s in spots for a in anchors):
+                return False
+        return True
+
+    for key, keyword in _GROUNDING_KEYWORDS.items():
+        anchors = [m.start() for m in re.finditer(keyword, text, re.I)]
+        kept_rows = []
+        for item in result.get("critical_limitations") or []:
+            topic = str(item.get("topic") or "") if isinstance(item, dict) else ""
+            detail = str(item.get("detail") or "") if isinstance(item, dict) else str(item or "")
+            if re.search(keyword, topic, re.I) and _MONEY_IN_CLAUSE.search(detail) and not grounded(detail, anchors):
+                result.setdefault("extraction_warnings", []).append(f"Removed limitation not found in the documents: {topic}: {detail[:160]}")
+                continue
+            kept_rows.append(item)
+        if "critical_limitations" in result:
+            result["critical_limitations"] = kept_rows
+
+    for key, keyword in _GROUNDING_KEYWORDS.items():
+        value = str(benefits.get(key) or "")
+        if not _MONEY_IN_CLAUSE.search(value):
+            continue
+        anchors = [m.start() for m in re.finditer(keyword, text, re.I)]
+        kept, dropped = [], []
+        for clause in re.split(r"(?<=[.;])\s+", value):
+            amounts = [a.replace(",", "").replace(".", "") for a in _MONEY_IN_CLAUSE.findall(clause)]
+            ok = True
+            for amount in amounts:
+                # Some PDFs extract every glyph twice ("EUREUR 125125"); accept that form too.
+                spots = [
+                    m.start() for m in re.finditer(r"\d[\d,.]*", text)
+                    if m.group(0).replace(",", "").replace(".", "") in (amount, amount * 2)
+                ]
+                if not any(abs(s - a) <= window for s in spots for a in anchors):
+                    ok = False
+                    break
+            (kept if ok else dropped).append(clause)
+        if dropped and kept:
+            benefits[key] = " ".join(kept).strip()
+            result.setdefault("extraction_warnings", []).append(
+                f"{key}: removed a figure not found near this benefit in the documents — " + " ".join(dropped)[:200]
+            )
     return result

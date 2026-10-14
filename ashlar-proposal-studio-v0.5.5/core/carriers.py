@@ -143,6 +143,14 @@ def generic_quote_facts(text: str) -> dict:
     facts["selected_modules"] = set()
     facts["benefit_hints"] = {}
     facts["fact_warnings"] = []
+    # Quote rows that state evacuation cover as a percentage (APRIL layout).
+    evac = re.search(r"Emergency\s+Medical\s+Evacuation\s+or\s+Repatriation[^%]{0,160}?(?P<pct>\d{1,3})\s*%", text, re.I | re.S)
+    if evac:
+        hint = f"Emergency medical evacuation or repatriation: {evac.group('pct')}%"
+        remains = re.search(r"Repatriation\s+of\s+mortal\s+remains[^%]{0,160}?(?P<pct>\d{1,3})\s*%", text, re.I | re.S)
+        if remains:
+            hint += f"; repatriation of mortal remains: {remains.group('pct')}%"
+        facts["benefit_hints"]["evacuation_repatriation"] = hint + " (applicant quotation)."
     return facts
 
 

@@ -10,21 +10,31 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.util import Inches, Pt
 
+from .benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT
+from .benefit_state import mark as benefit_mark
 from .report_labels import topic_label
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative
 from .household import REL_GREEK
 
-NAVY = RGBColor(12, 26, 42)
-NAVY2 = RGBColor(18, 36, 58)
-INK = RGBColor(28, 37, 55)
-MUTED = RGBColor(105, 117, 137)
-BORDER = RGBColor(225, 231, 239)
-BG = RGBColor(246, 248, 251)
-WHITE = RGBColor(255, 255, 255)
-PURPLE = RGBColor(108, 76, 245)
-GOLD = RGBColor(231, 173, 67)
-GREEN = RGBColor(21, 150, 106)
-RED = RGBColor(196, 72, 72)
+# The Ashlar palette, the same tokens the PDF and the HTML page use, so a
+# client who receives the deck and the document sees one firm rather than two.
+# The names are the roles the rest of this module already refers to; only the
+# values change. What they replace -- a cool navy, a violet accent, a web
+# default green and a bright gold -- appears on no Ashlar surface.
+INK = RGBColor(0x1B, 0x24, 0x32)        # type and dark surfaces: not black, blue in it
+NAVY = INK                              # masthead and table header
+NAVY2 = RGBColor(0x2A, 0x34, 0x44)      # mortar on dark surfaces
+MUTED = RGBColor(0x6B, 0x62, 0x56)      # warm grey, reads against limestone
+BORDER = RGBColor(0xD7, 0xCD, 0xBC)     # mortar: the 1px joint between blocks
+BG = RGBColor(0xF2, 0xED, 0xE4)         # limestone ground
+WHITE = RGBColor(0xF9, 0xF6, 0xEE)      # paper-fine; never pure white on an Ashlar surface
+PURPLE = RGBColor(0x70, 0x18, 0x1C)     # the one accent: oxblood
+OXBLOOD = PURPLE
+GOLD = RGBColor(0xB8, 0x8A, 0x2B)       # amber, caution only
+AMBER = GOLD
+GREEN = RGBColor(0x4A, 0x6E, 0x6B)      # verdigris: covered / available
+VERDIGRIS = GREEN
+RED = OXBLOOD                           # serious reads oxblood, never scare-red
 FONT = "Aptos"
 
 
@@ -71,6 +81,32 @@ def _rect(slide, x, y, w, h, fill, radius=False, line=None):
     else:
         shp.line.fill.background()
     return shp
+
+
+# Symbol as well as hue, so a state still reads in a printed handout and for a
+# colour-blind viewer. "unknown" gets no mark: a benefit the documents never
+# specified is not a fifth state, it is plain words.
+MARK_SYMBOL = {COVERED: "\u25cf", ACTION: "\u25cb", SUB_LIMIT: "\u25b2", NOT_COVERED: "\u2715"}
+
+
+def _marked_cell(row, name):
+    """The comparison cell as the deck should print it.
+
+    Benefit rows carry a mark; a premium or an area of cover does not, because
+    those are facts rather than states. The text is the mark's text, which is
+    what keeps "Not covered" free of the specification the editorial rule
+    forbids beside it.
+    """
+    values, marks = row.get("values") or {}, row.get("marks") or {}
+    raw = values.get(name)
+    if str(row.get("category") or "") != "Benefits":
+        return raw, INK
+    cell = marks.get(name) or benefit_mark(raw)
+    state, text = cell.get("state"), cell.get("text")
+    symbol = MARK_SYMBOL.get(state)
+    if not symbol:
+        return text, MUTED
+    return f"{symbol} {text}", (OXBLOOD if state == NOT_COVERED else INK)
 
 
 def _text(slide, text, x, y, w, h, size=16, bold=False, color=INK, align=PP_ALIGN.LEFT, valign=MSO_ANCHOR.TOP, fit=False):
@@ -148,10 +184,10 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
     _text(s, "ASHLAR ASSURANCE", .75, .55, 4, .32, 10, True, GOLD)
     _text(s, client_analysis.get("report_title") or "Insurance Comparative Analysis", .75, 1.18, 11.75, 1.72, 28, True, WHITE, fit=True)
     _text(s, client_analysis.get("client_name") or "Client", .75, 3.15, 10.5, .5, 18, True, WHITE, fit=True)
-    _text(s, lab["subtitle"], .75, 3.82, 9.3, .5, 12, False, RGBColor(188, 200, 215), fit=True)
-    _rect(s, .7, 5.45, 4.15, .65, NAVY2, True, RGBColor(52, 74, 98))
+    _text(s, lab["subtitle"], .75, 3.82, 9.3, .5, 12, False, RGBColor(0xC9, 0xC0, 0xB2), fit=True)
+    _rect(s, .7, 5.45, 4.15, .65, NAVY2, True, NAVY2)
     _text(s, f"{len(results)} {lab["reviewed"]}", .95, 5.61, 3.65, .28, 12, True, WHITE)
-    _text(s, date.today().strftime("%d %B %Y"), .7, 6.68, 2.6, .25, 9, False, RGBColor(160, 175, 193))
+    _text(s, date.today().strftime("%d %B %Y"), .7, 6.68, 2.6, .25, 9, False, RGBColor(0xA9, 0xA0, 0x92))
 
     # Client needs + executive summary
     s = _base(prs, lab["context"])
@@ -241,13 +277,14 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
             _rect(s, x, top, col_w, row_h, NAVY2)
             _text(s, _compact(name, 32), x+.09, top+.12, col_w-.18, .45, 8, True, WHITE, PP_ALIGN.CENTER, MSO_ANCHOR.MIDDLE)
         for i, row in enumerate(rows):
-            y = top+row_h*(i+1); fill = WHITE if i%2==0 else RGBColor(249,250,252)
+            y = top+row_h*(i+1); fill = WHITE if i%2==0 else RGBColor(0xF9, 0xF6, 0xEE)
             _rect(s, left, y, first_w, row_h, fill, False, BORDER)
             _text(s, topic_label(row.get("topic"), language), left+.12, y+.12, first_w-.24, .45, 9, True)
             for j, name in enumerate(names):
                 x = left+first_w+j*col_w
                 _rect(s, x, y, col_w, row_h, fill, False, BORDER)
-                _text(s, _compact((row.get("values") or {}).get(name), 54), x+.09, y+.08, col_w-.18, .52, 8, False)
+                cell_text, cell_colour = _marked_cell(row, name)
+                _text(s, _compact(cell_text, 54), x+.09, y+.08, col_w-.18, .52, 8, False, cell_colour)
         _footer(s, lab["footer"])
 
     # Key differences — keep generous internal margins and no more than 3 cards per slide.
@@ -289,12 +326,12 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
     y=2.12
     for idx, (label, name, reason) in enumerate(cards[:3]):
         h=1.28 if idx else 1.48
-        _rect(s, 8.05, y, 4.55, h, NAVY2, True, RGBColor(53,75,98))
+        _rect(s, 8.05, y, 4.55, h, NAVY2, True, NAVY2)
         _text(s, label, 8.35, y+.18, 3.9, .22, 9.5, True, GOLD)
         _text(s, name, 8.35, y+.45, 3.9, .34, 12.5, True, WHITE, fit=True)
-        _text(s, reason, 8.35, y+.82, 3.86, h-.9, 8.2, False, RGBColor(194,207,221), fit=True)
+        _text(s, reason, 8.35, y+.82, 3.86, h-.9, 8.2, False, RGBColor(0xC9, 0xC0, 0xB2), fit=True)
         y += h + .16
-    _text(s, lab["final"], .72, 6.82, 11.7, .26, 8.5, False, RGBColor(157,174,193), fit=True)
+    _text(s, lab["final"], .72, 6.82, 11.7, .26, 8.5, False, RGBColor(0xA9, 0xA0, 0x92), fit=True)
 
     # Considerations / next steps
     s = _base(prs, lab["before"])

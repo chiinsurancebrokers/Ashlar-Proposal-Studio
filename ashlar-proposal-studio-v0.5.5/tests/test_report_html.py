@@ -216,3 +216,63 @@ def test_the_insurers_own_words_are_never_translated():
     page = _html([EUROPE, WORLDWIDE], language="Greek")
     assert "Within EUR 5,000 combined" in page
     assert "Worldwide excluding USA" in page
+
+
+# ---------------------------------------------------------------------------
+# Dark mode, and the print rule that dark mode is allowed to exist under
+# ---------------------------------------------------------------------------
+
+def test_the_page_has_a_dark_ground_and_keeps_the_meaning_of_each_colour():
+    """A client opens this on a phone in the evening. The ground inverts; the
+    roles do not -- verdigris still means covered, oxblood still means absent."""
+    page = _html([EUROPE, WORLDWIDE])
+    assert "@media (prefers-color-scheme:dark)" in page
+    assert ':root[data-theme="dark"]' in page
+    assert "--verdigris:#79A8A3" in page and "--oxblood:#C9565A" in page
+
+
+def test_printing_cannot_be_broken_by_dark_mode():
+    """The regression this guards is a real one. The dark rule is written as
+    :root:not([data-theme="light"]), which outranks a plain :root, so a print
+    block that redefines the tokens without !important loses to it -- and a
+    client printing from a dark-mode machine gets near-white ink on white
+    paper. That is how the first Polat comparison printed: no title, no marks.
+
+    Every token the dark rule sets must be set again in the print block, and
+    each one must carry !important.
+    """
+    import re
+    page = _html([EUROPE])
+    print_block = page[page.index("@media print{"):]
+    dark = page[page.index("@media (prefers-color-scheme:dark)"):]
+    dark_tokens = set(re.findall(r"(--[a-z-]+):", dark[:dark.index("}")  + 1]))
+    assert dark_tokens, "the dark rule sets no tokens"
+    for token in dark_tokens:
+        if token == "--mortar-dark":
+            continue
+        assert re.search(rf"{token}:[^;]+!important", print_block), f"{token} is not forced for print"
+
+
+def test_print_keeps_the_table_on_the_sheet_and_the_marks_visible():
+    page = _html([EUROPE, WORLDWIDE])
+    print_block = page[page.index("@media print{"):]
+    # A table with a minimum width wider than the sheet is clipped at its edge.
+    assert "min-width:0" in print_block
+    assert "overflow:visible" in print_block
+    # The header repeats when the table runs over a page.
+    assert "table-header-group" in print_block
+
+
+def test_the_title_is_visible_in_dark_mode():
+    """The masthead is light-on-dark by construction. Inverting the tokens
+    swaps its ground and its ink, which paints the title dark on a dark
+    ground -- the same disappearance the printed version suffered. The dark
+    rule must name the masthead's ink explicitly."""
+    import re
+    page = _html([EUROPE])
+    dark_rules = page[:page.index("@media print")]
+    rule = re.search(
+        r'\.masthead h1,\s*:root:not\(\[data-theme="light"\]\) \.masthead \.client\{([^}]*)\}',
+        dark_rules)
+    assert rule, "the dark rule never names the masthead's ink"
+    assert "color:var(--ink)" in rule.group(1)

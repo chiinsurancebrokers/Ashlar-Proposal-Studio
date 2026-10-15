@@ -80,6 +80,49 @@ def _p(text, style):
 MARK_SYMBOL = {COVERED: "\u25cf", ACTION: "\u25cb", SUB_LIMIT: "\u25b2", NOT_COVERED: "\u2715"}
 MARK_COLOUR = {COVERED: "#4A6E6B", ACTION: "#1B2432", SUB_LIMIT: "#B88A2B", NOT_COVERED: "#70181C"}
 
+# Letters that every text font has, for the case where none of the installed
+# fonts can draw the shapes. Uglier than the symbols and still unambiguous,
+# which is the whole requirement: the state must never depend on colour alone.
+MARK_FALLBACK = {COVERED: "+", ACTION: "o", SUB_LIMIT: "!", NOT_COVERED: "x"}
+
+
+def _register_mark_font():
+    """Pick a font that can actually draw the four marks.
+
+    The body font is chosen for reading; it is not obliged to carry Geometric
+    Shapes. The container ships Noto Sans, which does not, so every mark in
+    the client's PDF came out as .notdef and the four states were
+    distinguishable only by colour -- invisible in a black-and-white print and
+    to a colour-blind reader, which is the one thing the marks exist to
+    prevent.
+
+    reportlab parses the cmap when it registers a face, so the glyphs can be
+    checked rather than assumed. That check is the whole point of this
+    function: the local machine had DejaVu and the container did not, and
+    nothing in the output said so.
+    """
+    wanted = {ord(ch) for ch in MARK_SYMBOL.values()}
+    for index, path in enumerate((
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+    )):
+        if not Path(path).exists():
+            continue
+        name = f"AshlarMarks{index}"
+        try:
+            font = TTFont(name, path)
+            if not wanted <= set(getattr(font.face, "charToGlyph", {})):
+                continue
+            pdfmetrics.registerFont(font)
+            return name
+        except Exception:
+            continue
+    return None
+
+
+MARK_FONT = _register_mark_font()
+
 
 def _marked(cell: dict, style):
     """One comparison cell: the state's symbol, then the text it applies to."""
@@ -91,7 +134,11 @@ def _marked(cell: dict, style):
     colour = MARK_COLOUR[state]
     if state == NOT_COVERED:
         safe = f"<font color='{colour}'>{safe}</font>"
-    return Paragraph(f"<font color='{colour}'>{MARK_SYMBOL[state]}</font> {safe}", style)
+    if MARK_FONT:
+        glyph = f"<font name='{MARK_FONT}' color='{colour}'>{MARK_SYMBOL[state]}</font>"
+    else:
+        glyph = f"<font color='{colour}'>{MARK_FALLBACK[state]}</font>"
+    return Paragraph(f"{glyph} {safe}", style)
 
 
 def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str = "English", source_documents: list[dict] | None = None) -> bytes:

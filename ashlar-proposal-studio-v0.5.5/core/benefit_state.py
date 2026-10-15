@@ -70,12 +70,25 @@ _NOT_COVERED_WHOLE_CELL = set(_normalised(*{
     "κανένα", "καμία", "όχι",
 }))
 
+# The verdict lives in the opening clause. These extractions are written
+# verdict-first -- "Included ...", "Not covered ...", "Unclear ..." -- and
+# everything after it describes that verdict.
+_LEAD_SPLIT = re.compile(r"[.;\n]")
+
+
+def _lead(value: str) -> str:
+    """The cell's opening clause: what the extraction concluded."""
+    return _LEAD_SPLIT.split(value, 1)[0].strip()
+
+
 # Something has to happen before the benefit pays.
 _ACTION = _normalised(
     "pre-authorisation", "pre-authorization", "preauthorisation", "preauthorization",
     "prior approval", "pre-approval", "preapproval", "prior authorisation",
     "requires approval", "must be approved", "on referral", "referral required",
     "reimbursed on claim", "confirm with insurer", "subject to approval",
+    "unclear", "to be confirmed", "depending on underwriting", "depends on underwriting",
+    "not stated", "confirm on the certificate",
     # Greek
     "προέγκριση", "κατόπιν έγκρισης", "απαιτείται έγκριση", "παραπομπή",
 )
@@ -130,7 +143,20 @@ def classify(text) -> str:
 
     if value in _NOT_COVERED_WHOLE_CELL:
         return NOT_COVERED
-    if any(term in value for term in _NOT_COVERED):
+
+    # The absence has to be the verdict, not a clause inside it.
+    #
+    # This scanned the whole cell once, and it put a client-facing document
+    # into the world saying APRIL covered no maternity, no dental, no optical
+    # and no cancer. Each of those cells began "Included ..." and went on to
+    # name what sat outside the benefit -- "Orthodontics are not covered",
+    # "Laser vision correction is not covered", "Cancer preventive surgery is
+    # not covered". A detail of a covered benefit was read as the verdict on
+    # it, and display_text then replaced the whole cell with "Not covered",
+    # deleting the cover the client had actually bought.
+    #
+    # A benefit is absent when its opening clause says so.
+    if any(term in _lead(value) for term in _NOT_COVERED):
         return NOT_COVERED
     if any(term in value for term in _ACTION):
         return ACTION

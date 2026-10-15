@@ -8,7 +8,10 @@ WORKDIR /app
 
 # Noto Sans gives ReportLab reliable Greek + Latin Unicode support.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-core \
+    && apt-get install -y --no-install-recommends fonts-noto-core fonts-dejavu-core \
+    # DejaVu is here for the four comparison marks. Noto Sans has no glyph for
+    # them, so every mark rendered as .notdef in the client's PDF and the state
+    # was carried by colour alone.
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

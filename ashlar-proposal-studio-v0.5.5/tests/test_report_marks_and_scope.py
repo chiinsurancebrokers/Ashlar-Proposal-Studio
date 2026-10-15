@@ -30,7 +30,7 @@ def _plan(provider, plan, area, benefits, premium="6,841.27"):
 MP = _plan("Morgan Price", "Comprehensive", "Europe", {
     "inpatient": "Paid in full",
     "outpatient": "Within EUR 5,000 combined",
-    "dental": "Not covered at this tier, complications EUR 10,000 after 10 months",
+    "dental": "Not covered on this quotation.",
     "mental_health": "Pre-authorisation required, 30 days",
 })
 APRIL = _plan("APRIL", "MyHealth Essential", "Worldwide excluding USA", {
@@ -77,13 +77,34 @@ def test_the_states_match_what_the_documents_say():
 def test_a_not_covered_benefit_loses_its_specification_in_the_value():
     """Chris's editorial rule, enforced in the data rather than the renderer:
     "when something is not covered you will not write specification - just not
-    covered". The original stays on the mark for the broker."""
+    covered". The original stays on the mark for the broker.
+
+    It applies where the benefit pays nothing. Where part of it pays, the cell
+    keeps what it pays -- see the companion test below, which exists because
+    the earlier reading of this rule told a client they had no mental health
+    cover when they had EUR 500 and seven sessions.
+    """
     row = _row(build_comparison_matrix([MP, APRIL]), "Dental")
     mp = "Morgan Price - Comprehensive"
     assert row["values"][mp] == "Not covered"
-    assert "10,000" not in row["values"][mp]
-    assert "10,000" in row["marks"][mp]["original"]
+    assert "quotation" not in row["values"][mp]
+    assert "quotation" in row["marks"][mp]["original"]
     assert row["marks"][mp]["allows_detail"] is False
+
+
+def test_a_partly_covered_benefit_keeps_its_figures_in_the_value():
+    """The companion rule, from the case that went to a client."""
+    mixed = dict(MP)
+    mixed["analysis"] = dict(MP["analysis"])
+    mixed["analysis"]["benefits"] = dict(MP["analysis"]["benefits"])
+    mixed["analysis"]["benefits"]["mental_health"] = (
+        "Inpatient psychiatric care is not covered. Outpatient treatment is "
+        "limited to EUR 500, max 7 sessions."
+    )
+    row = _row(build_comparison_matrix([mixed, APRIL]), "Mental health")
+    value = row["values"]["Morgan Price - Comprehensive"]
+    assert "EUR 500" in value and "7 sessions" in value
+    assert value != "Not covered"
 
 
 def test_financial_and_scope_rows_are_not_marked():

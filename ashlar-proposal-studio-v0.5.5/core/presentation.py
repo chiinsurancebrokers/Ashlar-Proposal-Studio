@@ -10,6 +10,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.util import Inches, Pt
 
+from .report_labels import topic_label
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative
 
 NAVY = RGBColor(12, 26, 42)
@@ -227,7 +228,7 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
         for i, row in enumerate(rows):
             y = top+row_h*(i+1); fill = WHITE if i%2==0 else RGBColor(249,250,252)
             _rect(s, left, y, first_w, row_h, fill, False, BORDER)
-            _text(s, row.get("topic"), left+.12, y+.12, first_w-.24, .45, 9, True)
+            _text(s, topic_label(row.get("topic"), language), left+.12, y+.12, first_w-.24, .45, 9, True)
             for j, name in enumerate(names):
                 x = left+first_w+j*col_w
                 _rect(s, x, y, col_w, row_h, fill, False, BORDER)

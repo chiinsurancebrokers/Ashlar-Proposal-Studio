@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 
+from .benefit_state import coverage_areas as _coverage_areas, mark as benefit_mark, scope_differs
 from .json_utils import parse_best_json_object, parse_json_objects
 from .report_schema import ClientReportValidationError, validate_client_report
 
@@ -244,15 +245,6 @@ def _internal_consideration(text: Any) -> bool:
     return any(re.search(p, key) for p in patterns)
 
 
-def _positive_waiting_period_or_usage(text: Any) -> bool:
-    key = str(text or "").casefold()
-    return any(token in key for token in (
-        "waiting period", "annual limit", "sub-limit", "sublimit", "deductible",
-        "not covered", "excluded", "limited to", "per visit", "per year",
-        "pre-authorisation", "preauthorization", "network", "area of cover",
-    ))
-
-
 
 def _normalise_underwriting_basis(value: Any) -> str:
     key = str(value or "").strip().casefold()
@@ -427,20 +419,39 @@ def apply_client_report_rules(
     ass["alternative_reason"] = _neutralise_module_architecture_bias(_strip_age_health_inference(ass.get("alternative_reason")))
     ass["when_the_alternative_may_be_better"] = _neutralise_module_architecture_bias(_strip_age_health_inference(ass.get("when_the_alternative_may_be_better")))
 
-    # Client-facing considerations: useful policy mechanics only, not internal broker housekeeping.
+    # Client-facing considerations: useful policy mechanics only, not internal
+    # broker housekeeping.
+    #
+    # Two guards, both of which remove something for a stated reason: internal
+    # housekeeping, and a waiting-period claim the documents do not support.
+    #
+    # There used to be a third rule here, and it was the dangerous one: a
+    # consideration was KEPT only if it mentioned a waiting period or one of
+    # five words (mental health, chronic, dental, optical, usa). Everything
+    # else was dropped with no record. On the France relocation case that
+    # silently deleted the three caveats the client most needed -- that the
+    # premium is quoted before 14% French insurance premium tax, that the
+    # insurer had not yet confirmed its position on the applicant's
+    # nationality, and that paying monthly adds an 8% administration fee.
+    # None of those contain any of the five words. A client-facing report is
+    # the wrong place for a silent allowlist: a consideration is removed
+    # because it is housekeeping or because it is ungrounded, not because it
+    # failed to use an expected word.
     considerations = []
     for item in report.get("important_considerations") or []:
-        if _internal_consideration(item):
+        text = str(item or "").strip()
+        if not text:
             continue
-        if not relevant_maternity and _contains_maternity(item):
+        if _internal_consideration(text):
             continue
-        if _positive_waiting_period_or_usage(item) or any(k in str(item).casefold() for k in ("mental health", "chronic", "dental", "optical", "usa")):
-            considerations.append(str(item).strip())
+        if not relevant_maternity and _contains_maternity(text):
+            continue
+        if not _waiting_period_claim_supported(text, results):
+            continue
+        considerations.append(text)
         if len(considerations) >= 5:
             break
-    report["important_considerations"] = [
-        item for item in considerations if _waiting_period_claim_supported(item, results)
-    ]
+    report["important_considerations"] = considerations
 
     # Deterministic prose sanity checks for easy-to-verify comparative superlatives.
     _sanitize_advisory_superlatives(report, results)
@@ -472,7 +483,33 @@ def apply_client_report_rules(
 
     report["client_sex"] = _normalise_sex(client_sex)
     report["client_age"] = client_age
+    report["coverage_areas"] = _coverage_areas(results)
+    report["coverage_scope_note"] = coverage_scope_note(results, language=language)
     return report
+
+
+def coverage_scope_note(results: list[dict], *, language: str = "English") -> str:
+    """The warning that has to come before any price, or an empty string.
+
+    A Europe-only premium set beside two worldwide premiums reads as a bargain
+    when it is a different product. The note is derived from the extracted
+    areas of cover rather than written by the model, so a comparison cannot go
+    out without it when the scopes genuinely differ.
+    """
+    if not scope_differs(results):
+        return ""
+    areas = _coverage_areas(results)
+    listed = "; ".join(f"{name}: {area}" for name, area in areas.items() if area)
+    greek = str(language).lower().startswith(("gr", "el")) or "greek" in str(language).lower()
+    if greek:
+        return (
+            "Τα προγράμματα που συγκρίνονται δεν έχουν την ίδια γεωγραφική κάλυψη, "
+            "επομένως τα ασφάλιστρα δεν είναι άμεσα συγκρίσιμα. " + listed + "."
+        )
+    return (
+        "The plans compared here are not written for the same territory, so the "
+        "premiums are not directly comparable. " + listed + "."
+    )
 
 
 def build_comparison_matrix(
@@ -487,14 +524,32 @@ def build_comparison_matrix(
     rows: list[dict] = []
 
     def add_row(topic: str, getter, category: str = "Core") -> None:
-        rows.append({
-            "category": category,
-            "topic": topic,
-            "values": {
-                name: _safe_text(getter((r.get("analysis") or {})))
-                for name, r in zip(plan_names, results)
-            },
-        })
+        """One comparison row, with a four-state mark on every benefit cell.
+
+        The mark is only attached to benefit rows. A premium or an area of
+        cover is a fact, not a state: running "EUR 3,608.04 annual" through the
+        benefit classifier would put an amber sub-limit triangle beside a
+        price, which says nothing true.
+
+        For benefit rows the displayed value is the mark's text rather than the
+        raw extraction, which is what enforces the editorial rule: a benefit
+        that is not covered reads "Not covered" and carries no specification
+        beside the cross. The raw extraction stays in the mark as `original`
+        so a broker can still see what the document said.
+        """
+        values: dict[str, str] = {}
+        marks: dict[str, dict] = {}
+        for name, result in zip(plan_names, results):
+            raw = _safe_text(getter((result.get("analysis") or {})))
+            if category == "Benefits":
+                marks[name] = benefit_mark(raw)
+                values[name] = marks[name]["text"]
+            else:
+                values[name] = raw
+        row: dict = {"category": category, "topic": topic, "values": values}
+        if category == "Benefits":
+            row["marks"] = marks
+        rows.append(row)
 
     add_row("Premium", premium_display, "Financial")
     add_row("Annual policy limit", lambda a: a.get("annual_limit"), "Financial")

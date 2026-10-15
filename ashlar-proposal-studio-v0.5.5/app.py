@@ -19,6 +19,7 @@ from core.api_client import AshlarAPIError, api_configured, enqueue_chat, enqueu
 from core.client_analysis import build_comparison_matrix, generate_client_analysis, plan_display_name, client_facing_deductible
 from core.report_schema import ClientReportValidationError, validate_client_report
 from core.presentation import build_pptx_bytes
+from core.report_html import build_html_bytes
 from core.report_pdf import build_pdf_bytes
 from core.client_pack import collect_client_source_documents, build_client_pack_zip
 from core.email_delivery import EmailDeliveryError, email_delivery_configured, email_delivery_status, send_client_email
@@ -1379,7 +1380,14 @@ def render_client_deliverable(results: list[dict]) -> None:
                 language=language,
                 source_documents=report_sources,
             )
+            html_bytes = build_html_bytes(
+                client_analysis=report,
+                results=results,
+                language=language,
+                source_documents=report_sources,
+            )
             pdf_filename = f"{safe_name}_Ashlar_Insurance_Analysis.pdf"
+            html_filename = f"{safe_name}_Ashlar_Insurance_Analysis.html"
             pptx_filename = f"{safe_name}_Ashlar_Insurance_Analysis.pptx"
             pack_bytes = build_client_pack_zip(
                 report_pdf_bytes=pdf_bytes,
@@ -1388,7 +1396,7 @@ def render_client_deliverable(results: list[dict]) -> None:
                 link_validity_days=int(link_days),
             )
 
-            d1, d2, d3 = st.columns(3)
+            d1, d2, d3, d4 = st.columns(4)
             with d1:
                 st.download_button(
                     "Download Ashlar PDF",
@@ -1407,6 +1415,15 @@ def render_client_deliverable(results: list[dict]) -> None:
                 )
             with d3:
                 st.download_button(
+                    "Download Ashlar web page",
+                    data=html_bytes,
+                    file_name=html_filename,
+                    mime="text/html",
+                    use_container_width=True,
+                    help="One self-contained page: opens on a phone, prints to PDF from any browser.",
+                )
+            with d4:
+                st.download_button(
                     "Download complete Client Pack ZIP",
                     data=pack_bytes,
                     file_name=f"{safe_name}_Ashlar_Client_Pack.zip",
@@ -1414,7 +1431,11 @@ def render_client_deliverable(results: list[dict]) -> None:
                     use_container_width=True,
                     type="primary",
                 )
-            st.caption("The PDF includes an Official Provider Documents page. The ZIP contains the analysis PDF plus the actual provider brochure PDFs.")
+            st.caption(
+                "The PDF includes an Official Provider Documents page. The web page is the same "
+                "report as one HTML file that opens on a phone and prints to PDF from any browser. "
+                "The ZIP contains the analysis PDF plus the actual provider brochure PDFs."
+            )
 
             if source_documents:
                 st.markdown("### Provider documents for this case")

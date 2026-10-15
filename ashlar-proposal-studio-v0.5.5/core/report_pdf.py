@@ -18,42 +18,31 @@ from reportlab.platypus import (
     PageBreak, KeepTogether,
 )
 
-from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative
+from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative, coverage_scope_note
+from .report_labels import all_labels as _labels, category_label, topic_label
+from .benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT
+from .benefit_state import mark as benefit_mark
 
-NAVY = colors.HexColor("#0C1A2A")
-NAVY2 = colors.HexColor("#12243A")
-INK = colors.HexColor("#1C2537")
-MUTED = colors.HexColor("#6C768A")
-PURPLE = colors.HexColor("#6C4CF5")
-GOLD = colors.HexColor("#E7AD43")
-GREEN = colors.HexColor("#15966A")
-BORDER = colors.HexColor("#E1E7EF")
-LIGHT = colors.HexColor("#F6F8FB")
-WHITE = colors.white
+# The Ashlar palette. The names on the left are the roles the rest of this
+# module already uses; the values are the house tokens, so the PDF, the HTML
+# page and the website are the same document in three media. The old values
+# (a navy masthead, a violet accent, a web-default green and gold) belonged to
+# no Ashlar surface and made the client's PDF look like a different firm's.
+INK = colors.HexColor("#1B2432")          # type and dark surfaces: not black, blue in it
+NAVY = INK                                # masthead / table header
+NAVY2 = colors.HexColor("#2A3444")        # mortar on dark surfaces
+MUTED = colors.HexColor("#6B6256")        # warm grey, reads against limestone
+PURPLE = colors.HexColor("#70181C")       # the one accent: oxblood
+OXBLOOD = PURPLE
+GOLD = colors.HexColor("#B88A2B")         # amber, caution only
+AMBER = GOLD
+GREEN = colors.HexColor("#4A6E6B")        # verdigris: covered / available
+VERDIGRIS = GREEN
+BORDER = colors.HexColor("#D7CDBC")       # mortar: 1px joints between blocks
+LIGHT = colors.HexColor("#F9F6EE")        # the quietest surface inside a block
+PAPER = colors.HexColor("#F2EDE4")        # limestone ground
+WHITE = colors.HexColor("#F9F6EE")        # never pure white on an Ashlar surface
 
-
-def _labels(language: str) -> dict:
-    greek = str(language).lower().startswith(("gr", "el")) or "greek" in str(language).lower()
-    if greek:
-        return {
-            "subtitle": "Ανεξάρτητη συγκριτική ανάλυση και αιτιολογημένη συμβουλευτική άποψη",
-            "footer": "Ανεξάρτητη συγκριτική ανάλυση", "context": "Πλαίσιο πελάτη", "profile": "Προφίλ / πλαίσιο",
-            "exec": "Συνοπτική εικόνα", "strengths": "Πλεονεκτήματα", "consider": "Σημεία προσοχής",
-            "compare": "Συγκριτικός πίνακας", "compare_note": "Ο πίνακας παρουσιάζει συνοπτικά τους όρους που εξήχθησαν από τα διαθέσιμα έγγραφα. Τα συμβατικά έγγραφα παραμένουν δεσμευτικά.",
-            "benefit": "Κάλυψη / όρος", "diff": "Κύριες διαφορές", "assessment": "Πρόταση Ashlar", "our_view": "Η πρότασή μας",
-            "preferred": "Προτεινόμενη επιλογή", "alternative": "Ισχυρή εναλλακτική", "extras": "Επιλογή με ευρύτερα πρόσθετα", "budget": "Οικονομικότερη επιλογή", "important_next": "Σημαντικές επισημάνσεις & επόμενα βήματα",
-            "important": "Σημαντικές επισημάνσεις", "next": "Επόμενα βήματα", "notice": "Σημαντική σημείωση",
-            "sources": "Επίσημα έγγραφα ασφαλιστικών εταιρειών", "sources_note": "Τα παρακάτω brochures / Tables of Benefits είναι τα έγγραφα των ασφαλιστικών εταιρειών που συνοδεύουν την ανάλυση. Οι προσωρινοί σύνδεσμοι ενδέχεται να λήξουν.", "open_doc": "Άνοιγμα εγγράφου",
-        }
-    return {
-        "subtitle": "Independent plan comparison and reasoned advisory view", "footer": "Independent comparative analysis",
-        "context": "Client context", "profile": "Profile / context", "exec": "Executive summary", "strengths": "Strengths",
-        "consider": "Points to consider", "compare": "Side-by-side comparison", "compare_note": "The table below presents the extracted plan terms side by side. Long policy clauses are intentionally condensed for readability; governing documents remain controlling.",
-        "benefit": "Benefit / term", "diff": "Key differences", "assessment": "Ashlar Recommendation", "our_view": "Our recommendation",
-        "preferred": "Recommended option", "alternative": "Strong alternative", "extras": "Broader extras option", "budget": "Budget option", "important_next": "Important considerations & next steps",
-        "important": "Important considerations", "next": "Next steps", "notice": "Important notice",
-        "sources": "Official provider documents", "sources_note": "The brochures / Tables of Benefits below are the insurer documents supplied with this analysis. Temporary web links may expire.", "open_doc": "Open document",
-    }
 
 
 def _register_fonts():
@@ -81,6 +70,26 @@ FONT, FONT_BOLD = _register_fonts()
 
 def _p(text, style):
     return Paragraph(str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), style)
+
+
+# Symbol as well as hue, so the state still reads in a black-and-white printout
+# and for a colour-blind reader. "unknown" gets no mark: a benefit the
+# documents never specified is not a fifth state, it is plain words.
+MARK_SYMBOL = {COVERED: "\u25cf", ACTION: "\u25cb", SUB_LIMIT: "\u25b2", NOT_COVERED: "\u2715"}
+MARK_COLOUR = {COVERED: "#4A6E6B", ACTION: "#1B2432", SUB_LIMIT: "#B88A2B", NOT_COVERED: "#70181C"}
+
+
+def _marked(cell: dict, style):
+    """One comparison cell: the state's symbol, then the text it applies to."""
+    state = cell.get("state")
+    text = str(cell.get("text") or "Not specified")
+    safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if state not in MARK_SYMBOL:
+        return Paragraph(f"<font color='#6B6256'>{safe}</font>", style)
+    colour = MARK_COLOUR[state]
+    if state == NOT_COVERED:
+        safe = f"<font color='{colour}'>{safe}</font>"
+    return Paragraph(f"<font color='{colour}'>{MARK_SYMBOL[state]}</font> {safe}", style)
 
 
 def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str = "English", source_documents: list[dict] | None = None) -> bytes:
@@ -113,7 +122,7 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     Body = ParagraphStyle("Body", parent=styles["BodyText"], fontName=FONT, fontSize=9.2, leading=13.2, textColor=INK, spaceAfter=5)
     Small = ParagraphStyle("Small", parent=Body, fontSize=7.3, leading=9.6, textColor=MUTED)
     WhiteH = ParagraphStyle("WhiteH", parent=H1, textColor=WHITE, fontSize=25, leading=29)
-    WhiteBody = ParagraphStyle("WhiteBody", parent=Body, textColor=colors.HexColor("#D4DFEA"), fontSize=10.5, leading=14.5)
+    WhiteBody = ParagraphStyle("WhiteBody", parent=Body, textColor=colors.HexColor("#C9C0B2"), fontSize=10.5, leading=14.5)
     Bullet = ParagraphStyle("Bullet", parent=Body, leftIndent=10, firstLineIndent=-7, bulletIndent=0)
 
     story = []
@@ -132,6 +141,18 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     ]))
     story += [Spacer(1, 10*mm), cover, PageBreak()]
 
+    scope_note = str(client_analysis.get("coverage_scope_note") or "").strip() or coverage_scope_note(results, language=language)
+    if scope_note:
+        strip = Table([[_p(lab["scope_warning"], ParagraphStyle("ScopeH", parent=H2, textColor=GOLD, spaceBefore=0)),
+                        _p(scope_note, Body)]], colWidths=[62*mm, doc.width-62*mm])
+        strip.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), LIGHT), ("BOX", (0,0), (-1,-1), .4, BORDER),
+            ("LINEBEFORE", (0,0), (0,-1), 1.4, GOLD), ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6),
+            ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+        ]))
+        story += [strip, Spacer(1, 5*mm)]
+
     story += [_p(lab["context"], H1), _p(client_analysis.get("client_needs_summary") or client_analysis.get("client_priorities") or "No specific priorities supplied.", Body), Spacer(1, 3*mm)]
     profile = client_analysis.get("client_profile")
     if profile and profile != "Not supplied":
@@ -146,8 +167,8 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
         n = find_plan_narrative(narrative_plans, result)
         story += [_p(f"{key[0]} - {key[1]}", H1)]
         facts = [
-            ["Premium", premium_display(a), "Annual limit", a.get("annual_limit") or "Not specified"],
-            ["Deductible / excess", client_facing_deductible(a.get("deductible_or_excess") or "Not specified"), "Area", a.get("area_of_cover") or "Not specified"],
+            [lab["f_premium"], premium_display(a), lab["f_limit"], a.get("annual_limit") or "Not specified"],
+            [lab["f_deductible"], client_facing_deductible(a.get("deductible_or_excess") or "Not specified"), lab["f_area"], a.get("area_of_cover") or "Not specified"],
         ]
         fact_tbl = Table([[ _p(c, Small if i%2==0 else Body) for i,c in enumerate(row)] for row in facts], colWidths=[30*mm, 85*mm, 30*mm, 105*mm])
         fact_tbl.setStyle(TableStyle([
@@ -171,8 +192,28 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     names = [plan_display_name(r) for r in results]
     header = [_p(lab["benefit"], ParagraphStyle("TH", parent=Small, fontName=FONT_BOLD, textColor=WHITE))] + [_p(n, ParagraphStyle("TH2", parent=Small, fontName=FONT_BOLD, textColor=WHITE, alignment=TA_CENTER)) for n in names]
     data = [header]
+    band_rows: list[int] = []
+    seen_category = None
     for row in matrix:
-        data.append([_p(row.get("topic"), ParagraphStyle("Topic", parent=Small, fontName=FONT_BOLD, textColor=INK))] + [_p((row.get("values") or {}).get(n) or "Not specified", Small) for n in names])
+        category = str(row.get("category") or "").strip()
+        if category and category != seen_category:
+            seen_category = category
+            band_rows.append(len(data))
+            data.append([_p(category_label(category, language), ParagraphStyle("Band", parent=Small, fontName=FONT_BOLD, textColor=MUTED))]
+                        + [_p("", Small)] * len(names))
+        topic = _p(topic_label(row.get("topic"), language), ParagraphStyle("Topic", parent=Small, fontName=FONT_BOLD, textColor=INK))
+        values, marks = row.get("values") or {}, row.get("marks") or {}
+        is_benefit = str(row.get("category") or "") == "Benefits"
+        cells = []
+        for n in names:
+            raw = values.get(n)
+            if not is_benefit:
+                cells.append(_p(raw or "Not specified", Small))
+                continue
+            # Recomputed when the stored matrix predates the marks, so an older
+            # case renders with its states rather than losing them.
+            cells.append(_marked(marks.get(n) or benefit_mark(raw), Small))
+        data.append([topic] + cells)
     first = 38*mm; other = (doc.width-first)/max(len(names),1)
     comp = Table(data, colWidths=[first]+[other]*len(names), repeatRows=1)
     comp.setStyle(TableStyle([
@@ -182,9 +223,23 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
         ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
     ]))
     for i in range(1, len(data)):
-        if i % 2 == 0:
+        if i in band_rows:
+            comp.setStyle(TableStyle([
+                ("SPAN", (0,i), (-1,i)), ("BACKGROUND", (0,i), (-1,i), PAPER),
+            ]))
+        elif i % 2 == 0:
             comp.setStyle(TableStyle([("BACKGROUND", (0,i), (-1,i), LIGHT)]))
-    story += [comp, PageBreak()]
+    # The symbols are no use to a client who was never told what they mean.
+    # One line, above the table: the reader meets the marks already knowing
+    # what they are, and the key cannot be orphaned onto a page of its own or
+    # push the table off this one.
+    key_parts = []
+    for state, key in ((COVERED, "mark_covered"), (ACTION, "mark_action"),
+                       (SUB_LIMIT, "mark_sub_limit"), (NOT_COVERED, "mark_not_covered")):
+        safe = str(lab[key]).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        key_parts.append(f"<font color='{MARK_COLOUR[state]}'>{MARK_SYMBOL[state]}</font> {safe}")
+    legend = Paragraph("&nbsp;&nbsp;&nbsp;".join(key_parts), Small)
+    story += [legend, Spacer(1, 2*mm), comp, PageBreak()]
 
     # Differences and assessment
     story += [_p(lab["diff"], H1)]
@@ -236,7 +291,7 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
                 if url:
                     link_markup = (
                         f"<b>{xml_escape(prefix)}</b>: {xml_escape(filename)} "
-                        f"- <link href={quoteattr(url)} color='#6C4CF5'>{xml_escape(lab['open_doc'])}</link>"
+                        f"- <link href={quoteattr(url)} color='#70181C'>{xml_escape(lab['open_doc'])}</link>"
                     )
                     story += [Paragraph(link_markup, Body)]
                 else:

@@ -159,3 +159,74 @@ def test_a_missing_area_does_not_fake_a_difference():
 def test_a_single_plan_has_nothing_to_compare():
     assert scope_differs([_plan("A", "Plan", "Europe")]) is False
     assert scope_differs([]) is False
+
+
+# ---------------------------------------------------------------------------
+# The verdict is the opening clause, not any clause
+# ---------------------------------------------------------------------------
+#
+# These strings are the extraction's own words from the France relocation
+# case. Every one of them describes a benefit the client HAS, and every one
+# of them was printed to the client as "Not covered", because the classifier
+# scanned the whole cell for an absence and found one in a subordinate clause.
+#
+# The earlier tests in this file did not catch it: each of their negative
+# fixtures begins with the negative, so they tested the assumption rather than
+# probing it. A real cell names what sits outside a benefit as part of
+# describing the benefit.
+
+APRIL_DENTAL = (
+    "Included per the quote's Essential benefit overview; the selection icon did not "
+    "extract as text, so confirm on the certificate (quote p.4). Annual limit EUR 1,000. "
+    "Routine dental is 80% after 3 months; major dental is 80% after 6 months. "
+    "Orthodontics are not covered."
+)
+APRIL_OPTICAL = (
+    "Included per the quote Essential overview, subject to certificate confirmation. "
+    "Eye examination and visual aids up to EUR 200, with one frame every two years, "
+    "after a 6-month waiting period. Laser vision correction is not covered."
+)
+APRIL_CANCER = (
+    "Included at 100% for consultations, diagnostics and treatment as an inpatient, "
+    "day-patient or outpatient. Cancer-related appliances and counselling are not covered. "
+    "Cancer preventive surgery is not covered."
+)
+
+
+@pytest.mark.parametrize("text", [APRIL_DENTAL, APRIL_OPTICAL, APRIL_CANCER])
+def test_a_covered_benefit_is_not_erased_by_an_exclusion_inside_it(text):
+    """The regression that reached a client.
+
+    "Orthodontics are not covered" is a detail of a dental benefit the client
+    has. Reading it as the verdict told them they had no dental cover at all,
+    and the display rule then deleted the EUR 1,000 limit along with it.
+    """
+    assert classify(text) != NOT_COVERED
+    # The cover itself has to survive to the page.
+    assert display_text(text) == text
+    assert mark(text)["allows_detail"] is True
+
+
+def test_the_opening_clause_still_decides_a_real_absence():
+    assert classify("Not covered on this quotation.") == NOT_COVERED
+    assert display_text("Not covered on this quotation.") == "Not covered"
+    assert classify("Excluded. The wording lists this under general exclusions.") == NOT_COVERED
+
+
+def test_an_unresolved_benefit_asks_rather_than_guessing():
+    """"Unclear ... may be covered, depending on underwriting" is a question
+    for the insurer, not an absence and not a cap. The reader needs the
+    sentence, so the state has to be one that keeps it."""
+    text = ("Unclear. The guide says treatment for chronic, congenital and hereditary "
+            "conditions 'may be covered, depending on underwriting'. No separate chronic "
+            "benefit limit is stated.")
+    assert classify(text) == ACTION
+    assert display_text(text) == text
+
+
+def test_the_benefit_keeps_its_figures():
+    """What the client is actually buying is in the numbers, and the whole
+    failure was that the numbers were thrown away."""
+    assert "EUR 1,000" in display_text(APRIL_DENTAL)
+    assert "EUR 200" in display_text(APRIL_OPTICAL)
+    assert "100%" in display_text(APRIL_CANCER)

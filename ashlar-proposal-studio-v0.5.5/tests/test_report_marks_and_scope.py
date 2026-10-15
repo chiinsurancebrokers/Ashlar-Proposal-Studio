@@ -176,3 +176,42 @@ def test_an_ungrounded_waiting_period_claim_is_still_removed():
         "important_considerations": ["Elective surgery carries a 24-month waiting period."],
     }, results=[MP, APRIL])
     assert report["important_considerations"] == []
+
+
+# ---------------------------------------------------------------------------
+# The marks have to survive the font the container actually has
+# ---------------------------------------------------------------------------
+
+def test_the_pdf_never_prints_a_mark_the_font_cannot_draw():
+    """The regression that reached a client's PDF.
+
+    The body font is picked for reading and is not obliged to carry Geometric
+    Shapes. The container ships Noto Sans, which does not, so every mark came
+    out as .notdef -- the text layer of the delivered PDF reads
+    "\\x00 Not covered" -- and the four states were left distinguishable only
+    by colour. The local machine had DejaVu and rendered them, which is why it
+    passed inspection.
+
+    Either a font that can draw them is registered, or letters every font has
+    are used instead. What must never happen is an invisible mark.
+    """
+    from core import report_pdf
+
+    if report_pdf.MARK_FONT:
+        from reportlab.pdfbase import pdfmetrics
+        face = pdfmetrics.getFont(report_pdf.MARK_FONT).face
+        drawable = set(getattr(face, "charToGlyph", {}))
+        for state, symbol in report_pdf.MARK_SYMBOL.items():
+            assert ord(symbol) in drawable, f"{state} would print as .notdef"
+    else:
+        # No symbol font available: the fallback must be plain ASCII, which
+        # every text font can draw.
+        for state, ch in report_pdf.MARK_FALLBACK.items():
+            assert ch.isascii() and ch.isprintable(), state
+
+
+def test_every_state_has_a_fallback_distinct_from_the_others():
+    """Colour is never the only difference between two states."""
+    from core import report_pdf
+    assert set(report_pdf.MARK_FALLBACK) == set(report_pdf.MARK_SYMBOL)
+    assert len(set(report_pdf.MARK_FALLBACK.values())) == len(report_pdf.MARK_FALLBACK)

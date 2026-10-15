@@ -56,6 +56,13 @@ class ClientReport(BaseModel):
     report_title: str = Field(min_length=1)
     executive_summary: str = Field(min_length=1)
     client_needs_summary: str = ""
+    # Both are written deterministically by apply_client_report_rules from the
+    # extracted areas of cover, never by the narrative model. They are declared
+    # here so the contract is visible where the rest of the report is declared,
+    # and optional so a report stored before they existed still validates --
+    # the renderers recompute the note from `results` when it is absent.
+    coverage_areas: dict[str, str] = Field(default_factory=dict)
+    coverage_scope_note: str = ""
     plans: list[PlanNarrative] = Field(min_length=1)
     key_differences: list[KeyDifference] = Field(default_factory=list)
     ashlar_assessment: AshlarAssessment

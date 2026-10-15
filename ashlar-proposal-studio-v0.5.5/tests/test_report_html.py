@@ -225,10 +225,25 @@ def test_the_insurers_own_words_are_never_translated():
 def test_the_page_has_a_dark_ground_and_keeps_the_meaning_of_each_colour():
     """A client opens this on a phone in the evening. The ground inverts; the
     roles do not -- verdigris still means covered, oxblood still means absent."""
+    import re
     page = _html([EUROPE, WORLDWIDE])
     assert "@media (prefers-color-scheme:dark)" in page
     assert ':root[data-theme="dark"]' in page
-    assert "--verdigris:#79A8A3" in page and "--oxblood:#C9565A" in page
+
+    def tokens(block):
+        return dict(re.findall(r"(--[a-z-]+):\s*(#[0-9A-Fa-f]{3,8})", block))
+
+    light = tokens(page[page.index(":root{"):page.index("@media (prefers-color-scheme:dark)")])
+    # The data-theme block is the flat copy of the dark palette, which is
+    # easier to bound than the nested media query and carries the same values.
+    dark_start = page.index(':root[data-theme="dark"]{')
+    dark = tokens(page[dark_start:page.index("}", dark_start)])
+    # The roles survive the inversion; the values do not. Asserting the exact
+    # hexes would make this test a copy of the palette rather than a check on
+    # it, and it would fail the moment the brand colours change.
+    for role in ("--ink", "--paper", "--oxblood", "--verdigris", "--amber"):
+        assert role in dark, f"{role} is not restated for dark"
+        assert dark[role].lower() != light.get(role, "").lower(), f"{role} was not adjusted for dark"
 
 
 def test_printing_cannot_be_broken_by_dark_mode():

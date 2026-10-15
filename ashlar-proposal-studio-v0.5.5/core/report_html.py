@@ -64,9 +64,9 @@ MARK_LABEL_KEY = {
 
 CSS = """
 :root{
-  --paper:#F2EDE4; --paper-fine:#F9F6EE; --mortar:#D7CDBC; --mortar-dark:#2A3444;
-  --ink:#1B2432; --oxblood:#70181C; --verdigris:#4A6E6B; --amber:#B88A2B;
-  --muted:#6B6256;
+  --paper:#F6F8FB; --paper-fine:#FFFFFF; --mortar:#E1E7EF; --mortar-dark:#12243A;
+  --ink:#0C1A2A; --oxblood:#6C4CF5; --verdigris:#15966A; --amber:#E7AD43;
+  --muted:#6C768A;
   --display:"Fraunces",Georgia,"Times New Roman",serif;
   --sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -90,14 +90,14 @@ CSS = """
   :root:not([data-theme="light"]){
     --paper:#151C27; --paper-fine:#1B2432; --mortar:#2E3A4D;
     --ink:#ECE6DB; --mortar-dark:#2E3A4D; --muted:#9A9387;
-    --oxblood:#C9565A; --verdigris:#79A8A3; --amber:#D4A849;
+    --oxblood:#9A85FF; --verdigris:#3FC78E; --amber:#F0C168;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --paper:#151C27; --paper-fine:#1B2432; --mortar:#2E3A4D;
   --ink:#ECE6DB; --mortar-dark:#2E3A4D; --muted:#9A9387;
-  --oxblood:#C9565A; --verdigris:#79A8A3; --amber:#D4A849;
+  --oxblood:#9A85FF; --verdigris:#3FC78E; --amber:#F0C168;
   color-scheme:dark;
 }
 
@@ -254,9 +254,9 @@ footer .line{font-family:var(--mono); font-size:10px; letter-spacing:.1em;
   :root, :root[data-theme="dark"], :root:not([data-theme="light"]){
     --paper:#fff!important; --paper-fine:#fff!important;
     --mortar:#B9AE9B!important; --mortar-dark:#B9AE9B!important;
-    --ink:#1B2432!important; --muted:#5C6474!important;
-    --oxblood:#70181C!important; --verdigris:#3C5A57!important;
-    --amber:#8A6718!important;
+    --ink:#0C1A2A!important; --muted:#5C6474!important;
+    --oxblood:#6C4CF5!important; --verdigris:#0E6F4F!important;
+    --amber:#9A7420!important;
     color-scheme:light;
   }
   body{background:#fff!important; color:var(--ink)!important; font-size:10.5pt}

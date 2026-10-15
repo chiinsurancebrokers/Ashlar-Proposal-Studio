@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import re
 from typing import Callable
 
+from .amounts import canonical_amount, parse_amount
+
 
 MISSING = {"", "—", "-", "not specified", "not mentioned", "unclear", "null", "none"}
 
@@ -23,10 +25,8 @@ def missing(value) -> bool:
 
 
 def _number(raw: str) -> float:
-    try:
-        return float(raw.replace(",", ""))
-    except Exception:
-        return -1.0
+    value = parse_amount(raw)
+    return -1.0 if value is None else value
 
 
 def _currency_code(token: str) -> str:
@@ -61,7 +61,7 @@ def _premium_from_anchored_patterns(text: str) -> dict | None:
         r"(?:final\s+total\s+premium|total\s+annual\s+premium|annual\s+premium|yearly\s+premium|premium\s+per\s+annum|total\s+premium)"
         r"[^\d€$£A-Z]{0,60}(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)",
         r"(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)\s*"
-        r"(?:annual(?:ly)?|per\s+annum|per\s+year|indicative\s+per\s+year)",
+        r"(?:annual(?:ly)?|per\s+annum|per\s+year|a\s+year|indicative\s+per\s+year)",
         r"\bpremium\b[^\n\r]{0,45}(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)",
     ]
     candidates: list[tuple[float, str, str]] = []
@@ -73,7 +73,7 @@ def _premium_from_anchored_patterns(text: str) -> dict | None:
     if not candidates:
         return None
     _, cur, amt = max(candidates, key=lambda x: x[0])
-    return {"amount": amt.replace(",", ""), "currency": _currency_code(cur), "frequency": "Annual"}
+    return {"amount": canonical_amount(amt), "currency": _currency_code(cur), "frequency": "Annual"}
 
 
 def _generic_area(text: str) -> str | None:
@@ -143,6 +143,14 @@ def generic_quote_facts(text: str) -> dict:
     facts["selected_modules"] = set()
     facts["benefit_hints"] = {}
     facts["fact_warnings"] = []
+    # Quote rows that state evacuation cover as a percentage (APRIL layout).
+    evac = re.search(r"Emergency\s+Medical\s+Evacuation\s+or\s+Repatriation[^%]{0,160}?(?P<pct>\d{1,3})\s*%", text, re.I | re.S)
+    if evac:
+        hint = f"Emergency medical evacuation or repatriation: {evac.group('pct')}%"
+        remains = re.search(r"Repatriation\s+of\s+mortal\s+remains[^%]{0,160}?(?P<pct>\d{1,3})\s*%", text, re.I | re.S)
+        if remains:
+            hint += f"; repatriation of mortal remains: {remains.group('pct')}%"
+        facts["benefit_hints"]["evacuation_repatriation"] = hint + " (applicant quotation)."
     return facts
 
 
@@ -158,7 +166,7 @@ def cigna_quote_facts(text: str) -> dict:
         flags=re.IGNORECASE | re.DOTALL,
     )
     if m:
-        facts["premium"] = {"amount": m.group("amt").replace(",", ""), "currency": _currency_code(m.group("cur")), "frequency": "Annual"}
+        facts["premium"] = {"amount": canonical_amount(m.group("amt")), "currency": _currency_code(m.group("cur")), "frequency": "Annual"}
         facts["quote_currency"] = facts["premium"]["currency"]
         facts["quoted_plan"] = m.group("plan").title()
     d = re.search(
@@ -228,7 +236,7 @@ def bupa_quote_facts(text: str) -> dict:
         )
         if total:
             facts["premium"] = {
-                "amount": total.group("amt").replace(",", ""),
+                "amount": canonical_amount(total.group("amt")),
                 "currency": "EUR",
                 "frequency": "Annual",
             }
@@ -300,8 +308,18 @@ def bupa_quote_facts(text: str) -> dict:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
+    if not premium:
+        # Monthly-payment quotes print the yearly total on the next line:
+        # "EUR 598 Monthly / EUR 7176 a year". Lock the yearly figure so the
+        # comparison is annual-to-annual.
+        premium = re.search(
+            r"Selected\s+plan\s*:.{0,160}?"
+            r"(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)\s*(?:a\s+year|per\s+year|per\s+annum|annually|/\s*year)",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
     if premium:
-        facts["premium"] = {"amount": premium.group("amt").replace(",", ""), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
+        facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
         facts["quote_currency"] = facts["premium"]["currency"]
 
     allowance = re.search(
@@ -324,7 +342,7 @@ def bupa_quote_facts(text: str) -> dict:
 
     hints = facts.setdefault("benefit_hints", {})
     covered_block = re.search(r"What's\s+covered\s*:\s*(?P<body>.*?)What's\s+not\s+covered\s*:", text, flags=re.IGNORECASE | re.DOTALL)
-    excluded_block = re.search(r"What's\s+not\s+covered\s*:\s*(?P<body>.*?)Important\s+documents", text, flags=re.IGNORECASE | re.DOTALL)
+    excluded_block = re.search(r"What's\s+not\s+covered\s*:\s*(?P<body>.*?)(?:Important\s+documents|\Z)", text, flags=re.IGNORECASE | re.DOTALL)
     covered = (covered_block.group("body") if covered_block else "").casefold()
     excluded = (excluded_block.group("body") if excluded_block else "").casefold()
     if "admitted" in covered or "hospital" in covered:
@@ -357,7 +375,7 @@ def now_health_quote_facts(text: str) -> dict:
 
     premium = re.search(r"Final\s+Total\s+Premium\s*:\s*(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)", text, flags=re.IGNORECASE)
     if premium:
-        facts["premium"] = {"amount": premium.group("amt").replace(",", ""), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
+        facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
         facts["quote_currency"] = facts["premium"]["currency"]
 
     uw = re.search(r"Underwriting\s+Basis\s*:\s*(?P<uw>[^\n\r]+)", text, flags=re.IGNORECASE)

@@ -12,8 +12,10 @@ from .storage import (
     LibraryStorageError,
     create_document_signed_url,
     get_documents,
+    list_catalog,
     read_document_bytes,
 )
+from .library_classify import product_mismatch
 
 
 @dataclass
@@ -77,11 +79,36 @@ def collect_client_source_documents(
             warnings.append(f"{provider}: provider documents could not be loaded ({exc}).")
             continue
 
-        provider_label = str(result.get("provider") or provider).strip() or provider
         analysis = result.get("analysis") or {}
+        # The insurer's name as read from its documents, not the label typed into the case.
+        provider_label = str(analysis.get("provider") or provider or result.get("provider")).strip() or provider
         plan_name = str(analysis.get("plan_name") or result.get("target_plan") or product).strip()
 
-        matching = [d for d in docs if d.doc_type in allowed and Path(d.original_filename).suffix.lower() == ".pdf"]
+        # A hospital / providers list decides where a stay is paid in full, so it
+        # always travels with the report, like the Table of Benefits.
+        def wanted(d) -> bool:
+            if d.doc_type in allowed:
+                return True
+            return bool(re.search(r"(?:providers?|hospitals?)[-_ ]list|network", d.original_filename or "", re.I))
+
+        try:
+            siblings = sorted({
+                c.get("product") for c in list_catalog()
+                if str(c.get("provider") or "").strip().casefold() == provider.casefold()
+            } - {None})
+        except LibraryStorageError:
+            siblings = []
+
+        def right_product(d) -> bool:
+            other = product_mismatch(product, d.extracted_text or "", siblings)
+            if other:
+                warnings.append(f"{d.original_filename} is filed under {product} but is the {other} document — not sent.")
+            return not other
+
+        matching = [
+            d for d in docs
+            if wanted(d) and Path(d.original_filename).suffix.lower() == ".pdf" and right_product(d)
+        ]
         for doc in matching:
             if doc.sha256 in seen_sha:
                 continue

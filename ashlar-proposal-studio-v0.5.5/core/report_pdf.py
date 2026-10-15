@@ -19,6 +19,7 @@ from reportlab.platypus import (
 )
 
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative, coverage_scope_note
+from .household import REL_GREEK
 from .report_labels import all_labels as _labels, category_label, topic_label
 from .benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT
 from .benefit_state import mark as benefit_mark
@@ -42,6 +43,7 @@ BORDER = colors.HexColor("#D7CDBC")       # mortar: 1px joints between blocks
 LIGHT = colors.HexColor("#F9F6EE")        # the quietest surface inside a block
 PAPER = colors.HexColor("#F2EDE4")        # limestone ground
 WHITE = colors.HexColor("#F9F6EE")        # never pure white on an Ashlar surface
+
 
 
 
@@ -157,6 +159,29 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     profile = client_analysis.get("client_profile")
     if profile and profile != "Not supplied":
         story += [_p(lab["profile"], H2), _p(profile, Body)]
+    members = client_analysis.get("insured_members") or []
+    if len(members) > 1:
+        greek_rel = lab["members"] != "Insured members"
+        head_style = ParagraphStyle("MemTH", parent=Small, fontName=FONT_BOLD)
+        rows = [[_p(c, head_style) for c in lab["member_cols"]]]
+        for m in members:
+            rel = str(m.get("relationship") or "")
+            dob = str(m.get("dob") or "")
+            dob_text = f"{dob[8:10]}/{dob[5:7]}/{dob[0:4]}" if len(dob) == 10 else "—"
+            rows.append([
+                _p(str(m.get("name") or "—"), Body),
+                _p(REL_GREEK.get(rel, rel) if greek_rel else rel, Body),
+                _p(dob_text, Body),
+                _p("—" if m.get("age") in (None, "") else str(m.get("age")), Body),
+                _p(str(m.get("nationality") or "—"), Body),
+            ])
+        mem_tbl = Table(rows, colWidths=[70*mm, 55*mm, 35*mm, 20*mm, 45*mm], hAlign="LEFT")
+        mem_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), LIGHT), ("GRID", (0,0), (-1,-1), .35, BORDER),
+            ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5),
+            ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        story += [_p(lab["members"], H2), mem_tbl, Spacer(1, 3*mm)]
     story += [_p(lab["exec"], H2), _p(client_analysis.get("executive_summary") or "", Body), PageBreak()]
 
     # Plans
@@ -284,7 +309,8 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
             story += [_p(provider, H2)]
             for src in docs_for_provider:
                 filename = str(src.get("filename") or "Provider document")
-                doc_type = str(src.get("doc_type") or "document").replace("_", " ").title()
+                raw_type = str(src.get("doc_type") or "document")
+                doc_type = lab["doc_types"].get(raw_type, raw_type.replace("_", " ").title())
                 plan_name = str(src.get("plan_name") or "").strip()
                 prefix = f"{doc_type} - {plan_name}" if plan_name else doc_type
                 url = str(src.get("url") or "").strip()

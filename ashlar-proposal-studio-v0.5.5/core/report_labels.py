@@ -54,6 +54,12 @@ _EXTRA_EN = {
     "f_deductible": "Deductible / excess",
     "f_area": "Area of cover",
     "plans_compared": "Plans compared",
+    # Carried over from the inline copy this module replaced, so the shared
+    # dictionary is not missing keys the PDF already renders.
+    "members": "Insured members",
+    "member_cols": ("Name", "Relationship", "Date of birth", "Age", "Nationality"),
+    "doc_types": {"brochure": "Brochure", "tob": "Table of Benefits", "wording": "Policy wording",
+                  "underwriting": "Underwriting guide", "supporting": "Supporting document"},
 }
 
 _EXTRA_EL = {
@@ -72,6 +78,10 @@ _EXTRA_EL = {
     "f_deductible": "Απαλλαγή",
     "f_area": "Γεωγραφική κάλυψη",
     "plans_compared": "Προγράμματα",
+    "members": "Ασφαλιζόμενα μέλη",
+    "member_cols": ("Όνομα", "Σχέση", "Ημ. γέννησης", "Ηλικία", "Υπηκοότητα"),
+    "doc_types": {"brochure": "Φυλλάδιο", "tob": "Πίνακας παροχών", "wording": "Όροι ασφάλισης",
+                  "underwriting": "Οδηγός ανάληψης κινδύνου", "supporting": "Συνοδευτικό έγγραφο"},
 }
 
 

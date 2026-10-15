@@ -6,8 +6,11 @@ import os
 import re
 
 
-from .json_utils import parse_first_json_object
+from .json_utils import parse_best_json_object, parse_first_json_object
 from .carriers import get_carrier_adapter, carrier_metadata
+from .amounts import canonical_amount, parse_amount
+from .plan_rules import apply_access_rules
+from .excerpt import benefit_focused_excerpt
 
 
 SCHEMA_PROMPT = """You are the analysis engine inside Ashlar Proposal Studio.
@@ -37,6 +40,9 @@ NON-NEGOTIABLE RULES:
 - Brochures are summaries. Policy wording/certificate remains the governing source.
 - If deterministic evidence contains a value, DO NOT return null for that field.
 - Keep diagnostics/advanced imaging separate from preventive or wellness benefits. MRI, CT and PET are diagnostic imaging, not wellness benefits.
+- A visit or consultation limit applies to each benefit separately unless the document says it is shared, combined or in total. Summary documents (IPID, key facts) that list several benefits after one number are listing per-benefit limits.
+- A providers/hospital list that names hospitals country by country restricts only the countries it lists; do not tell the client to verify hospitals in a country the list does not mention.
+- critical_limitations: one limit per item with a short topic naming that limit (e.g. "Prescribed medicines", "Consultation visits"), detail in at most 35 words. Split a group of separate caps into separate items rather than one long list.
 
 Return ONLY valid JSON:
 {
@@ -103,10 +109,8 @@ def _missing(value) -> bool:
 
 
 def _amount_number(raw: str) -> float:
-    try:
-        return float(raw.replace(",", ""))
-    except Exception:
-        return -1.0
+    value = parse_amount(raw)
+    return -1.0 if value is None else value
 
 
 def _currency_symbol(token: str) -> str:
@@ -138,7 +142,7 @@ def _extract_quote_facts(text: str) -> dict:
     if candidates:
         _, cur, amt = max(candidates, key=lambda x: x[0])
         facts["premium"] = {
-            "amount": amt.replace(",", ""),
+            "amount": canonical_amount(amt),
             "currency": _currency_symbol(cur),
             "frequency": "Annual",
         }
@@ -258,10 +262,16 @@ def _apply_deterministic_facts(result: dict, provider_label: str, quotation_text
     if quote.get("waiting_periods"):
         result["waiting_periods"] = quote["waiting_periods"]
 
+    # Quote-summary hints are applicant-specific for what was NOT bought, so an
+    # exclusion hint always wins. A generic "covered" hint ("see the membership
+    # guide") must not overwrite the detailed limits the model read from the
+    # guide itself; it only fills a benefit the extraction left empty.
     hints = quote.get("benefit_hints") or {}
     benefits = result.setdefault("benefits", {})
     for key, value in hints.items():
-        if value:
+        if not value:
+            continue
+        if _missing(benefits.get(key)) or re.search(r"\bnot covered\b|\bexcluded\b", str(value), re.I):
             benefits[key] = value
 
     annual = _find_row(rows, "annual overall benefit maximum")
@@ -378,20 +388,38 @@ def _needs_repair(result: dict) -> bool:
     return missing_headlines >= 2 or missing_benefits >= 5
 
 
+_RESULT_KEYS = ("provider", "plan_name", "premium", "benefits", "critical_limitations", "waiting_periods")
+_CONCISE_RETRY = (
+    "\n\nIMPORTANT: a previous answer to this request was too long and was cut off before the JSON closed. "
+    "Return the complete JSON object only. Keep each benefit value under 60 words, at most 12 "
+    "critical_limitations and at most 10 source_evidence rows."
+)
+
+
 def _call_model(client, model: str, payload: str) -> tuple[dict | None, str, str | None]:
-    response = client.messages.create(
-        model=model,
-        max_tokens=7000,
-        messages=[{"role": "user", "content": payload}],
-    )
-    raw = "".join(
-        block.text for block in response.content
-        if getattr(block, "type", None) == "text"
-    ).strip()
+    """One extraction call. A stronger model writes longer answers, so the output
+    budget is generous and a cut-off answer is retried once in concise form —
+    a truncated JSON would otherwise parse to a nested fragment with no benefits."""
+    raw = ""
+    for attempt in range(2):
+        response = client.messages.create(
+            model=model,
+            max_tokens=16000,
+            messages=[{"role": "user", "content": payload if attempt == 0 else payload + _CONCISE_RETRY}],
+        )
+        raw = "".join(
+            block.text for block in response.content
+            if getattr(block, "type", None) == "text"
+        ).strip()
+        if getattr(response, "stop_reason", None) != "max_tokens":
+            break
     try:
-        return parse_first_json_object(raw), raw, None
+        result = parse_best_json_object(raw, required_keys=_RESULT_KEYS)
     except json.JSONDecodeError as exc:
         return None, raw, str(exc)
+    if not any(k in result for k in ("benefits", "premium", "plan_name")):
+        return None, raw, "Model response did not contain the analysis object."
+    return result, raw, None
 
 
 def analyze_target_plan(
@@ -426,6 +454,8 @@ def analyze_target_plan(
         result = _apply_deterministic_facts(
             result, provider_label, quotation_text, focused_table_context
         )
+        # Network / prior-approval rules come from the full plan documents.
+        result = apply_access_rules(result, "\n\n".join([brochure_text or "", wording_text or ""]))
         result.setdefault("provider", provider_label)
         result.setdefault("plan_name", target_plan or quote.get("quoted_plan") or None)
         result.setdefault("target_plan_found", bool(target_plan or quote.get("quoted_plan") or focused_table_context))
@@ -449,7 +479,10 @@ def analyze_target_plan(
         deterministic_base["analysis_note"] = "AI enrichment unavailable; deterministic source facts shown."
         return _finalize(deterministic_base)
 
-    model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+    # Document extraction has its own model setting: reading a benefit table
+    # correctly needs a stronger model than the chat or plan-name helpers.
+    fallback_model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+    model = os.getenv("ANALYSIS_MODEL", "").strip() or fallback_model
     target_lock = target_plan or quote.get("quoted_plan") or "NOT YET IDENTIFIED"
 
     brochure_cap = 35000 if focused_table_context else 90000
@@ -466,16 +499,24 @@ TARGET PLAN: {target_lock}
 {quotation_text[:50000] or "Not supplied"}
 
 === BROCHURE / TABLE OF BENEFITS ===
-{brochure_text[:brochure_cap] or "Not supplied"}
+{benefit_focused_excerpt(brochure_text, brochure_cap) or "Not supplied"}
 
 === POLICY WORDING / SUPPORTING TERMS ===
-{wording_text[:70000] or "Not supplied"}
+{benefit_focused_excerpt(wording_text, 110000) or "Not supplied"}
 """
 
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
-        result, raw, parse_error = _call_model(client, model, payload)
+        try:
+            result, raw, parse_error = _call_model(client, model, payload)
+        except (anthropic.NotFoundError, anthropic.PermissionDeniedError, anthropic.BadRequestError):
+            # The configured analysis model is not available on this key: use the
+            # general model rather than dropping to deterministic facts only.
+            if model == fallback_model:
+                raise
+            model = fallback_model
+            result, raw, parse_error = _call_model(client, model, payload)
     except Exception as exc:
         deterministic_base["analysis_note"] = f"AI enrichment unavailable; deterministic source facts shown. ({type(exc).__name__})"
         return _finalize(deterministic_base)
@@ -502,7 +543,7 @@ PROVIDER: {provider_label}
 {focused_table_context[:55000] or "Not supplied"}
 
 === SUPPORTING TERMS ===
-{wording_text[:25000] or "Not supplied"}
+{benefit_focused_excerpt(wording_text, 25000) or "Not supplied"}
 """
         try:
             repair, _, _ = _call_model(client, model, repair_payload)
@@ -511,5 +552,6 @@ PROVIDER: {provider_label}
         except Exception:
             pass
 
+    result["analysis_model"] = model
     return _finalize(result)
 

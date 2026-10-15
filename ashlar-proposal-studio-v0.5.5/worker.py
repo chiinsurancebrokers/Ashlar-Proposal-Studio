@@ -11,6 +11,7 @@ import time
 import traceback
 
 from core.case_archive import load_case, save_case_snapshot
+from core.case_runner import analyze_option, reanalysis_inputs
 from core.chat import ask_case_agent
 from core.client_analysis import generate_client_analysis
 from core.jobs import claim_next_job, update_job, JobQueueError
@@ -21,7 +22,10 @@ POLL_SECONDS = float(os.getenv("ASHLAR_WORKER_POLL_SECONDS", "1.5"))
 WORKER_ID = os.getenv("ASHLAR_WORKER_ID", f"{socket.gethostname()}-{os.getpid()}")
 
 
-def _save_loaded_case(row: dict, *, chat=None, report=None, status=None):
+_KEEP = object()
+
+
+def _save_loaded_case(row: dict, *, chat=None, report=_KEEP, status=None, results=None):
     return save_case_snapshot(
         case_id=row.get("id"),
         case_reference=row.get("case_reference") or "",
@@ -31,9 +35,9 @@ def _save_loaded_case(row: dict, *, chat=None, report=None, status=None):
         client_sex=row.get("client_sex") or "Not specified",
         client_age=row.get("client_age"),
         report_language=row.get("report_language") or "English",
-        results=row.get("results_json") or [],
+        results=results if results is not None else (row.get("results_json") or []),
         case_chat=chat if chat is not None else (row.get("case_chat_json") or []),
-        client_analysis=report if report is not None else row.get("client_analysis_json"),
+        client_analysis=row.get("client_analysis_json") if report is _KEEP else report,
         status=status or row.get("status") or "analyzed",
     )
 
@@ -55,12 +59,47 @@ def process_report(job: dict) -> None:
         results=results,
         language=row.get("report_language") or "English",
         strict=True,
+        household_members=row.get("household_members_json") or [],
     )
     update_job(jid, progress_stage="Validating complete client report")
     validate_client_report(report, results)
     update_job(jid, progress_stage="Saving validated report")
     _save_loaded_case(row, report=report, status="report_ready")
     update_job(jid, status="completed", progress_stage="Report ready", result_json={"case_id": cid})
+
+
+def process_case_analysis(job: dict) -> None:
+    """Re-analyse every option of a saved case from its stored quotation text.
+
+    Used after a Provider Library fix: the quotes are not uploaded again.
+    request_json may carry {"labels": {"<old label>": "<new label>"}} to correct
+    an option label at the same time.
+    """
+    jid, cid = job["id"], job["case_id"]
+    request = job.get("request_json") or {}
+    relabel = request.get("labels") or {}
+    update_job(jid, progress_stage="Loading saved case")
+    row = load_case(cid)
+    saved = row.get("results_json") or []
+    missing = [r.get("provider") for r in saved if not (r.get("quotation_text") or "").strip()]
+    if missing:
+        raise ValueError(
+            "Saved case has no stored quotation text for: " + ", ".join(str(m) for m in missing)
+            + ". Re-run the analysis from the case form with the quote uploaded."
+        )
+    results, notes = [], []
+    for idx, old in enumerate(saved, start=1):
+        args = reanalysis_inputs(old)
+        args["label"] = relabel.get(args["label"], args["label"])
+        update_job(jid, progress_stage=f"Analysing option {idx}/{len(saved)}: {args['label']}")
+        result, warnings = analyze_option(**args)
+        results.append(result)
+        notes.extend(warnings)
+    update_job(jid, progress_stage="Saving analysed case")
+    # A new analysis invalidates the previous client report.
+    _save_loaded_case(row, results=results, report=None, status="analyzed")
+    update_job(jid, status="completed", progress_stage="Case re-analysed",
+               result_json={"case_id": cid, "options": len(results), "warnings": notes[:20]})
 
 
 def process_chat(job: dict) -> None:
@@ -92,6 +131,8 @@ def process(job: dict) -> None:
     kind = job.get("job_type")
     if kind == "client_report":
         process_report(job)
+    elif kind == "case_analysis":
+        process_case_analysis(job)
     elif kind == "hal_chat":
         process_chat(job)
     elif kind == "policy_review":

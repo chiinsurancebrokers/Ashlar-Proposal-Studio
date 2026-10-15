@@ -61,3 +61,8 @@ $$;
 
 grant execute on function public.claim_analysis_job(text) to service_role;
 revoke all on function public.claim_analysis_job(text) from anon, authenticated;
+
+-- v0.5.6: re-analyse a saved case from its stored quotation text.
+alter table public.analysis_jobs drop constraint if exists analysis_jobs_job_type_check;
+alter table public.analysis_jobs add constraint analysis_jobs_job_type_check
+    check (job_type in ('client_report', 'hal_chat', 'policy_review', 'case_analysis'));

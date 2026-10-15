@@ -12,6 +12,7 @@ from pptx.util import Inches, Pt
 
 from .report_labels import topic_label
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative
+from .household import REL_GREEK
 
 NAVY = RGBColor(12, 26, 42)
 NAVY2 = RGBColor(18, 36, 58)
@@ -156,6 +157,20 @@ def build_pptx_bytes(*, client_analysis: dict, results: list[dict], language: st
     s = _base(prs, lab["context"])
     _text(s, lab["what_matters"], .55, .8, 12, .55, 25, True)
     _text(s, client_analysis.get("client_needs_summary") or client_analysis.get("client_priorities") or "No specific priorities supplied.", .55, 1.48, 5.9, 2.2, 15, False, INK)
+    members = client_analysis.get("insured_members") or []
+    if len(members) > 1:
+        greek = not lab["context"].isascii()
+        title = "Ασφαλιζόμενα μέλη" if greek else "Insured members"
+        lines = []
+        for m in members:
+            rel = str(m.get("relationship") or "")
+            rel = REL_GREEK.get(rel, rel) if greek else rel
+            age = "" if m.get("age") in (None, "") else f", {m.get('age')}"
+            nat = f", {m.get('nationality')}" if m.get("nationality") else ""
+            name = str(m.get("name") or "").strip()
+            lines.append(f"{name} — {rel}{age}{nat}" if name else f"{rel}{age}{nat}")
+        _text(s, title, .55, 3.85, 5.9, .4, 15, True, PURPLE)
+        _text(s, "\n".join(lines[:6]), .55, 4.3, 5.9, 1.9, 12, False, INK)
     _rect(s, 6.75, 1.35, 5.95, 4.85, WHITE, True, BORDER)
     _text(s, lab["executive"], 7.05, 1.68, 5.25, .45, 17, True, PURPLE)
     _text(s, client_analysis.get("executive_summary") or "", 7.05, 2.28, 5.25, 3.55, 14, False, INK)

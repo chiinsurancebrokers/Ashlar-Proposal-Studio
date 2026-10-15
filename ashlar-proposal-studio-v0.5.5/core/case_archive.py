@@ -74,6 +74,7 @@ def save_case_snapshot(
     case_chat: list[dict] | None = None,
     client_analysis: dict | None = None,
     status: str = "analyzed",
+    household_members: list | None = None,
 ) -> dict:
     if not archive_configured():
         raise CaseArchiveError("Supabase Case Archive is not configured.")
@@ -100,6 +101,10 @@ def save_case_snapshot(
         "status": status,
         "updated_at": now,
     }
+    # Only written when the caller supplies it, so a worker save that does not
+    # know about dependants never wipes them.
+    if household_members is not None:
+        row["household_members_json"] = _json_safe(household_members)
     try:
         existing = _sb().table(_table()).select("id,created_at").eq("id", doc_id).execute().data or []
         if existing:

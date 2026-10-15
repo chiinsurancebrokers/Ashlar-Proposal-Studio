@@ -11,6 +11,7 @@ from .carriers import get_carrier_adapter, carrier_metadata
 from .amounts import canonical_amount, parse_amount
 from .plan_rules import apply_access_rules
 from .excerpt import benefit_focused_excerpt
+from .model_errors import explain as explain_model_error
 
 
 SCHEMA_PROMPT = """You are the analysis engine inside Ashlar Proposal Studio.
@@ -518,7 +519,12 @@ TARGET PLAN: {target_lock}
             model = fallback_model
             result, raw, parse_error = _call_model(client, model, payload)
     except Exception as exc:
-        deterministic_base["analysis_note"] = f"AI enrichment unavailable; deterministic source facts shown. ({type(exc).__name__})"
+        # "(AuthenticationError)" told the adviser which class was raised, not
+        # which setting to change.
+        deterministic_base["analysis_note"] = (
+            "AI enrichment unavailable; deterministic source facts shown. "
+            + explain_model_error(exc, model=model, subject="The document analysis")
+        )
         return _finalize(deterministic_base)
 
     if result is None:

@@ -17,6 +17,7 @@ from .amounts import annual_factor, parse_amount
 from .benefit_state import coverage_areas as _coverage_areas, mark as benefit_mark, scope_differs
 from .household import household_maternity_relevant, insured_people
 from .json_utils import parse_best_json_object, parse_json_objects
+from .model_errors import explain as explain_model_error
 from .plan_rules import localise_access_rows
 from .report_schema import ClientReportValidationError, validate_client_report
 
@@ -1723,10 +1724,18 @@ def generate_client_analysis(
         synthesis["ashlar_assessment"] = assessment_synthesis.get("ashlar_assessment") or {}
         out = _assemble_modular_report(payload=payload, synthesis=synthesis, language=language)
     except (json.JSONDecodeError, anthropic.APIError, anthropic.APIConnectionError) as exc:
+        # A broker reading this cannot act on a 401 body and a request id. Say
+        # which setting is wrong and where it lives; keep the raw text out of
+        # the client-facing surface entirely.
+        message = (
+            "The client report could not be generated: the model returned text that was not valid JSON."
+            if isinstance(exc, json.JSONDecodeError)
+            else explain_model_error(exc, model=model, subject="The client report")
+        )
         if strict:
-            raise ClientReportValidationError(f"Client decision synthesis failed: {exc}") from exc
+            raise ClientReportValidationError(message) from exc
         out = _fallback_analysis(payload, language)
-        out["generation_warning"] = f"Client decision synthesis failed: {exc}"
+        out["generation_warning"] = message
         out["raw_response_excerpt"] = (locals().get("raw_assessment") or locals().get("raw_summary") or "")[:1800]
 
     out["comparison_matrix"] = payload["comparison_matrix"]

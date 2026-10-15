@@ -89,22 +89,44 @@ def test_missing_values_are_marked_unknown_not_guessed(text):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("text", [
-    "Not covered at this tier, complications €10,000 after 10 months",
-    "Not covered. Emergency dental after an accident is paid in full",
+    "Not covered",
+    "Not covered on this quotation.",
     "Excluded — see the policy wording for the alternative benefit",
+    "This benefit is not available on the quoted tier.",
 ])
-def test_a_not_covered_cell_says_only_that(text):
+def test_a_cell_that_pays_nothing_says_only_that(text):
+    """The editorial rule, aimed where it belongs: a benefit that is genuinely
+    absent reads "Not covered" and carries no specification beside the cross."""
     assert classify(text) == NOT_COVERED
     assert display_text(text) == "Not covered"
 
 
+@pytest.mark.parametrize("text", [
+    "Not covered at this tier, complications €10,000 after 10 months",
+    "Not covered. Emergency dental after an accident is paid in full",
+    "Inpatient psychiatric care is not covered. Outpatient treatment is limited "
+    "to €500, max 7 sessions.",
+])
+def test_a_cell_that_pays_something_keeps_what_it_pays(text):
+    """These used to read "Not covered", and that is how a client was told
+    they had no mental health cover when they had EUR 500 and seven sessions.
+
+    An absence that applies to part of a benefit is not an absence. The rule
+    against writing a specification beside a cross was never meant to delete
+    cover; where something is paid, the cell says what.
+    """
+    assert classify(text) != NOT_COVERED
+    assert display_text(text) == text
+    assert mark(text)["allows_detail"] is True
+
+
 def test_mark_tells_the_renderer_when_detail_is_allowed():
-    absent = mark("Not covered at this tier, complications €10,000")
+    absent = mark("Not covered on this quotation, see the optional modules sheet")
     assert absent["state"] == NOT_COVERED
     assert absent["text"] == "Not covered"
     assert absent["allows_detail"] is False
     # The original is kept so a broker can still see what was extracted.
-    assert "complications" in absent["original"]
+    assert "optional modules" in absent["original"]
 
     capped = mark("Combined limit 2,500")
     assert capped["allows_detail"] is True

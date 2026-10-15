@@ -81,6 +81,37 @@ def _lead(value: str) -> str:
     return _LEAD_SPLIT.split(value, 1)[0].strip()
 
 
+# Words that say something IS paid. Deliberately excludes the bare word
+# "covered", which appears inside "not covered" and would make every absence
+# look like cover.
+_POSITIVE = _normalised(
+    "included", "paid in full", "full refund", "covered at", "covered in full",
+    "100%", "reimbursed", "limited to", "up to", "max ", "maximum", "sub-limit",
+    "within", "per year", "per claim", "allowance",
+    # Greek
+    "καλύπτεται στο", "πληρώνεται", "έως", "όριο", "περιλαμβάνεται",
+)
+
+
+def _has_positive_cover(value: str) -> bool:
+    """True when the cell says that anything at all is paid.
+
+    An amount, a cap, a count of visits or an explicit inclusion all mean
+    there is cover to show. Only a cell with none of these can honestly be
+    reduced to the two words "Not covered".
+
+    The negatives are removed before the search, because several of them
+    contain a positive word: "not included" ends in "included", and a cell
+    that says only that would otherwise look like cover.
+    """
+    remainder = value
+    for term in _NOT_COVERED:
+        remainder = remainder.replace(term, " ")
+    if any(term in remainder for term in _POSITIVE):
+        return True
+    return bool(_COUNTABLE.search(remainder) or _MONEY.search(remainder))
+
+
 # Something has to happen before the benefit pays.
 _ACTION = _normalised(
     "pre-authorisation", "pre-authorization", "preauthorisation", "preauthorization",
@@ -144,7 +175,7 @@ def classify(text) -> str:
     if value in _NOT_COVERED_WHOLE_CELL:
         return NOT_COVERED
 
-    # The absence has to be the verdict, not a clause inside it.
+    # The absence has to be the whole story, not a clause inside it.
     #
     # This scanned the whole cell once, and it put a client-facing document
     # into the world saying APRIL covered no maternity, no dental, no optical
@@ -155,8 +186,24 @@ def classify(text) -> str:
     # it, and display_text then replaced the whole cell with "Not covered",
     # deleting the cover the client had actually bought.
     #
-    # A benefit is absent when its opening clause says so.
-    if any(term in _lead(value) for term in _NOT_COVERED):
+    # Reading the opening clause alone was still not enough. This cell --
+    #
+    #   "Inpatient psychiatric care is not covered. Outpatient mental health
+    #    treatment is limited to EUR 500, max 7 sessions."
+    #
+    # -- opens with an absence that applies to one part of the benefit, and
+    # goes on to describe the part the client has. Reading the opening clause
+    # as the verdict deleted the EUR 500 and the seven sessions.
+    #
+    # A benefit is absent only when nothing in the cell says anything is
+    # paid. One positive signal anywhere -- an amount, a cap, a number of
+    # visits, "included", "paid in full" -- means there is cover to show, and
+    # the cell is shown.
+    #
+    # The editorial rule still holds where it was aimed: a benefit that is
+    # genuinely absent reads "Not covered" and carries no specification. It
+    # stops short of deleting cover the client has.
+    if any(term in value for term in _NOT_COVERED) and not _has_positive_cover(value):
         return NOT_COVERED
     if any(term in value for term in _ACTION):
         return ACTION

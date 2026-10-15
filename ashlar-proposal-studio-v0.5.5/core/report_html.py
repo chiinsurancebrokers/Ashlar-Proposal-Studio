@@ -71,6 +71,36 @@ CSS = """
   --sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
+/* Dark mode. A client opens this on a phone, often in the evening, and a
+   limestone page at full brightness is what they put down again.
+
+   The ground inverts, the roles do not: verdigris still means covered,
+   oxblood still means absent. Both are lifted, because the screen versions of
+   #4A6E6B and #70181C on a dark ground fall below a readable contrast.
+
+   The print block at the end of this file re-declares every one of these
+   tokens with !important. That is not belt and braces -- it is the specific
+   failure this page is avoiding. A rule written as
+   :root:not([data-theme="light"]) outranks a plain :root on specificity, so a
+   print stylesheet that redefines the tokens without !important loses to the
+   dark rule, and a client printing from a dark-mode machine gets near-white
+   ink on white paper. That is exactly how the first version of the Polat
+   comparison printed: the title and the marks simply were not there. */
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#151C27; --paper-fine:#1B2432; --mortar:#2E3A4D;
+    --ink:#ECE6DB; --mortar-dark:#2E3A4D; --muted:#9A9387;
+    --oxblood:#C9565A; --verdigris:#79A8A3; --amber:#D4A849;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#151C27; --paper-fine:#1B2432; --mortar:#2E3A4D;
+  --ink:#ECE6DB; --mortar-dark:#2E3A4D; --muted:#9A9387;
+  --oxblood:#C9565A; --verdigris:#79A8A3; --amber:#D4A849;
+  color-scheme:dark;
+}
+
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{
@@ -196,17 +226,51 @@ footer .line{font-family:var(--mono); font-size:10px; letter-spacing:.1em;
   table.compare tbody th{width:34%}
 }
 
+@media (prefers-color-scheme:dark){
+  /* The masthead is light-on-dark by construction: background var(--ink),
+     text var(--paper-fine). Invert the tokens and those two swap, so the
+     title is painted dark on a dark ground and disappears -- the same way it
+     disappeared from the printed Polat comparison, for the same reason. The
+     ground and the ink are therefore named explicitly here rather than left
+     to the tokens. */
+  :root:not([data-theme="light"]) .masthead,
+  :root:not([data-theme="light"]) footer{background:var(--paper-fine);
+    color:var(--ink)}
+  :root:not([data-theme="light"]) .masthead h1,
+  :root:not([data-theme="light"]) .masthead .client{color:var(--ink)}
+  :root:not([data-theme="light"]) .masthead .sub,
+  :root:not([data-theme="light"]) footer p{color:#A8A194}
+  :root:not([data-theme="light"]) .meta span{color:#8E887C}
+  :root:not([data-theme="light"]) table.compare thead th{background:#0F141D}
+  :root:not([data-theme="light"]) table.compare tbody th{background:var(--paper)}
+  :root:not([data-theme="light"]) table.compare tr.band th{background:var(--paper)}
+}
+
 @media print{
-  body{background:#fff; font-size:10.5pt}
+  /* Every token again, each one !important. The dark rule above is written as
+     :root:not([data-theme="light"]), which beats a plain :root on
+     specificity -- so without !important here, printing from a machine set to
+     dark mode puts near-white ink on white paper. */
+  :root, :root[data-theme="dark"], :root:not([data-theme="light"]){
+    --paper:#fff!important; --paper-fine:#fff!important;
+    --mortar:#B9AE9B!important; --mortar-dark:#B9AE9B!important;
+    --ink:#1B2432!important; --muted:#5C6474!important;
+    --oxblood:#70181C!important; --verdigris:#3C5A57!important;
+    --amber:#8A6718!important;
+    color-scheme:light;
+  }
+  body{background:#fff!important; color:var(--ink)!important; font-size:10.5pt}
+  .masthead,footer{background:#fff!important; color:var(--ink)!important}
+  table.compare thead th{background:#fff!important; color:var(--ink)!important}
+  table.compare tbody th,table.compare tr.band th{background:#fff!important}
   section{padding:14pt 0; break-inside:avoid}
-  .masthead,footer{background:#fff; color:var(--ink); border-color:var(--mortar)}
-  .masthead h1,.masthead .client{color:var(--ink)}
+  .masthead,footer{border-color:var(--mortar)}
+  .masthead h1,.masthead .client{color:var(--ink)!important}
   .masthead .sub,footer p{color:var(--muted)}
   .masthead .eyebrow,footer .line{color:var(--oxblood)}
   .meta div{border-color:var(--mortar)}
   .meta span{color:var(--muted)}
-  table.compare thead th{background:#fff; color:var(--ink); position:static;
-    border-bottom:1.5px solid var(--ink)}
+  table.compare thead th{position:static; border-bottom:1.5px solid var(--ink)}
   .scroller{overflow:visible}
   table.compare{min-width:0}
   thead{display:table-header-group}

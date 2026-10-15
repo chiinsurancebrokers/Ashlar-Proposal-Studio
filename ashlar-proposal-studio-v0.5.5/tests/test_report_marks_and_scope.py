@@ -29,7 +29,7 @@ def _plan(provider, plan, area, benefits, premium="6,841.27"):
 
 MP = _plan("Morgan Price", "Comprehensive", "Europe", {
     "inpatient": "Paid in full",
-    "outpatient": "EUR 2,500 per year",
+    "outpatient": "Within EUR 5,000 combined",
     "dental": "Not covered at this tier, complications EUR 10,000 after 10 months",
     "mental_health": "Pre-authorisation required, 30 days",
 })

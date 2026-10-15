@@ -26,7 +26,7 @@ def _plan(provider, plan, area, benefits, premium="6,841.27"):
 
 EUROPE = _plan("Morgan Price", "Comprehensive", "Europe", {
     "inpatient": "Paid in full",
-    "outpatient": "EUR 2,500 per year",
+    "outpatient": "Within EUR 5,000 combined",
     "dental": "Not covered at this tier, complications EUR 10,000 after 10 months",
     "mental_health": "Pre-authorisation required",
     "optical": "",
@@ -214,5 +214,5 @@ def test_the_insurers_own_words_are_never_translated():
     """A benefit value is a quotation from the insurer's document. Translating
     it would make the report say something the document does not."""
     page = _html([EUROPE, WORLDWIDE], language="Greek")
-    assert "EUR 2,500 per year" in page
+    assert "Within EUR 5,000 combined" in page
     assert "Worldwide excluding USA" in page

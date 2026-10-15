@@ -20,6 +20,7 @@ from core.api_client import AshlarAPIError, api_configured, enqueue_chat, enqueu
 from core.client_analysis import build_comparison_matrix, generate_client_analysis, plan_display_name, client_facing_deductible
 from core.report_schema import ClientReportValidationError, validate_client_report
 from core.presentation import build_pptx_bytes
+from core.benefit_audit import audit_case
 from core.report_html import build_html_bytes
 from core.report_pdf import build_pdf_bytes
 from core.client_pack import collect_client_source_documents, build_client_pack_zip
@@ -1224,6 +1225,88 @@ def render_case_chat(results: list[dict]) -> None:
             st.rerun()
 
 
+def _render_benefit_second_opinion(results: list[dict]) -> bool:
+    """A second reader checks the benefit lines before any document is built.
+
+    The reasoning that writes a benefit line is not placed to judge it. A
+    client pack went out saying a plan covered no maternity, no dental, no
+    optical and no cancer, and nothing in between was positioned to notice.
+    This puts a reader from a different model family in front of the
+    insurer's own document, one question per benefit.
+
+    Returns True only when the check ran for every plan AND the broker ticked
+    to say they have read it. A check that could not run does not open the
+    gate: silence is not agreement.
+    """
+    from core.client_analysis import BENEFIT_ORDER, plan_display_name
+
+    st.markdown("#### Second opinion on the benefit lines")
+    st.caption(
+        "A reader from a different model family checks every benefit line against the "
+        "provider document in the library. Documents cannot be generated until it has run."
+    )
+
+    documents: dict[str, str] = {}
+    missing: list[str] = []
+    for result in results or []:
+        name = plan_display_name(result)
+        text = ""
+        try:
+            items, _ = collect_client_source_documents([result], include_wording=True)
+            for item in items:
+                text += "\n\n" + str(item.document.extracted_text or "")
+        except Exception:
+            text = ""
+        if text.strip():
+            documents[name] = text
+        else:
+            missing.append(name)
+
+    if st.button("Run the second-opinion check"):
+        with st.spinner("A second reader is checking the benefit lines against the documents…"):
+            st.session_state["benefit_audit"] = audit_case(
+                results=results, documents=documents, benefit_order=BENEFIT_ORDER,
+            )
+
+    audit = st.session_state.get("benefit_audit")
+    if audit is None:
+        if missing:
+            st.info(
+                "No document text is stored for: " + ", ".join(missing)
+                + ". Link the provider documents in the library so they can be checked."
+            )
+        st.warning("The benefit lines have not been checked yet.")
+        return False
+
+    if not audit.ran:
+        st.error(audit.error or "The second-opinion check did not run.")
+        return False
+
+    disputed, unverified = audit.disagreements, audit.unverified
+    if disputed:
+        st.error(f"{len(disputed)} benefit line(s) disagree with the provider document.")
+        for finding in disputed:
+            with st.expander(f"{finding.plan} · {finding.benefit_label}", expanded=True):
+                st.markdown("**We wrote:**")
+                st.write(finding.extracted)
+                st.markdown("**The document says:**")
+                st.write(finding.note or "(no quotation returned)")
+    else:
+        st.success(f"No benefit line contradicts the documents ({len(audit.findings)} checked).")
+
+    if unverified:
+        st.info(
+            f"{len(unverified)} line(s) could not be confirmed from the documents supplied: "
+            + ", ".join(sorted({f"{f.plan} · {f.benefit_label}" for f in unverified}))
+            + ". These are not errors; the documents are silent on them."
+        )
+
+    return st.checkbox(
+        "I have read the second-opinion check and accept the benefit lines as they stand.",
+        key="benefit_audit_reviewed",
+    )
+
+
 def render_client_deliverable(results: list[dict]) -> None:
     st.write("")
     st.markdown(
@@ -1256,6 +1339,8 @@ def render_client_deliverable(results: list[dict]) -> None:
         "I have reviewed the material extracted facts and plan locks before generating the client analysis.",
         key="client_report_reviewed",
     )
+
+    audit_confirmed = _render_benefit_second_opinion(results)
     report_job_active = bool(st.session_state.get("client_report_job_id"))
     c1, c2 = st.columns([1.1, 3.9])
     with c1:
@@ -1263,7 +1348,12 @@ def render_client_deliverable(results: list[dict]) -> None:
             "Generate Client Analysis →",
             type="primary",
             use_container_width=True,
-            disabled=(not reviewed) or (not quality["can_generate"]) or report_job_active,
+            disabled=(
+                (not reviewed)
+                or (not audit_confirmed)
+                or (not quality["can_generate"])
+                or report_job_active
+            ),
         )
     with c2:
         mode = "FastAPI background worker" if _background_jobs_enabled() else "local synchronous fallback"

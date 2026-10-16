@@ -200,7 +200,11 @@ def test_the_generate_button_is_locked_behind_the_check():
     app = pathlib.Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
 
     # The gate is computed before the button and feeds its disabled state.
-    assert "audit_confirmed = _render_benefit_second_opinion(results)" in app
+    # It needs the benefit-line check AND the limitations check: both sections
+    # are rendered, then both have to be confirmed.
+    assert "benefits_confirmed = _render_benefit_second_opinion(results)" in app
+    assert "limitations_confirmed = _render_limitation_second_opinion(results)" in app
+    assert "audit_confirmed = benefits_confirmed and limitations_confirmed" in app
     # Anchored on the button itself: the file has several disabled= expressions
     # and matching the wrong one would make this test pass for free.
     button = app.index("\"Generate Client Analysis")
@@ -221,3 +225,27 @@ def test_the_section_refuses_to_confirm_before_it_has_run():
     assert body.index("if audit is None:") < body.index("st.checkbox")
     assert body.index("if not audit.ran:") < body.index("st.checkbox")
     assert body.count("return False") >= 2
+
+
+def test_the_limitations_section_refuses_to_confirm_before_it_has_run():
+    """Same guarantee for the limitations check: no completed audit, no tick box,
+    and the section hands back False so the gate stays shut."""
+    import pathlib
+    app = pathlib.Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    start = app.index("def _render_limitation_second_opinion")
+    body = app[start:app.index("\ndef render_client_deliverable")]
+    assert body.index("if audit is None:") < body.index("st.checkbox")
+    assert body.index("if not audit.ran:") < body.index("st.checkbox")
+    assert body.count("return False") >= 2
+
+
+def test_both_checks_must_pass_and_both_always_render():
+    """The gate is an AND of two sections that are each rendered unconditionally,
+    so a broker can never be shown only one of them (short-circuiting would hide
+    the second section whenever the first is unconfirmed)."""
+    import pathlib
+    app = pathlib.Path(__file__).resolve().parents[1].joinpath("app.py").read_text(encoding="utf-8")
+    first = app.index("benefits_confirmed = _render_benefit_second_opinion(results)")
+    second = app.index("limitations_confirmed = _render_limitation_second_opinion(results)")
+    gate = app.index("audit_confirmed = benefits_confirmed and limitations_confirmed")
+    assert first < second < gate

@@ -101,8 +101,10 @@ def process_case_analysis(job: dict) -> None:
         )
     results, notes = [], []
     for idx, old in enumerate(saved, start=1):
-        if keep_existing and old.get("analysis"):
-            # Already analysed and reviewed: keep it, apart from a label fix.
+        if keep_existing and (old.get("analysis") or {}).get("analysis_model"):
+            # Already analysed by the model: keep it, apart from a label fix.
+            # A row that only has deterministic facts (the model call failed)
+            # is analysed again.
             results.append({**old, "provider": relabel.get(old.get("provider"), old.get("provider"))})
             continue
         args = reanalysis_inputs(old)

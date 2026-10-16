@@ -7,7 +7,7 @@ import re
 
 
 from .json_utils import parse_best_json_object, parse_first_json_object
-from .carriers import get_carrier_adapter, carrier_metadata
+from .carriers import get_carrier_adapter, carrier_metadata, plan_column_facts
 from .amounts import canonical_amount, parse_amount
 from .plan_rules import apply_access_rules
 from .excerpt import benefit_focused_excerpt
@@ -228,7 +228,9 @@ def _is_covered(value: str) -> bool:
     return "covered (table checkmark)" in key or key.strip() in {"covered", "paid in full"}
 
 
-def _apply_deterministic_facts(result: dict, provider_label: str, quotation_text: str, focused_context: str) -> dict:
+def _apply_deterministic_facts(
+    result: dict, provider_label: str, quotation_text: str, focused_context: str, target_plan: str = ""
+) -> dict:
     """Lock material facts to quotation/table evidence so an LLM omission cannot blank the UI.
 
     Applicant-specific headline facts come from a carrier adapter. This keeps a Cigna
@@ -243,6 +245,10 @@ def _apply_deterministic_facts(result: dict, provider_label: str, quotation_text
 
     if quote.get("premium"):
         result["premium"] = quote["premium"]
+    # A quote with plans side by side: take the target plan's own column.
+    column = plan_column_facts(quotation_text, target_plan)
+    if column.get("premium"):
+        result["premium"] = column["premium"]
     if quote.get("deductible_or_excess"):
         result["deductible_or_excess"] = quote["deductible_or_excess"]
     if quote.get("area_of_cover"):
@@ -445,7 +451,7 @@ def analyze_target_plan(
         "confidence": "low",
     }
     deterministic_base = _apply_deterministic_facts(
-        deterministic_base, provider_label, quotation_text, focused_table_context
+        deterministic_base, provider_label, quotation_text, focused_table_context, target_plan
     )
 
     adapter = get_carrier_adapter(provider_label, quotation_text)
@@ -453,7 +459,7 @@ def analyze_target_plan(
 
     def _finalize(result: dict) -> dict:
         result = _apply_deterministic_facts(
-            result, provider_label, quotation_text, focused_table_context
+            result, provider_label, quotation_text, focused_table_context, target_plan
         )
         # Network / prior-approval rules come from the full plan documents.
         result = apply_access_rules(result, "\n\n".join([brochure_text or "", wording_text or ""]))

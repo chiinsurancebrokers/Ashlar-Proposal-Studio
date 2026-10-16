@@ -122,6 +122,48 @@ def _generic_annual_limit(text: str) -> str | None:
     return None
 
 
+_MONEY_CELL = re.compile(r"(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)", re.I)
+
+
+def plan_column_facts(text: str, target_plan: str) -> dict:
+    """The target plan's own premium on a quote that sets plans side by side.
+
+    APRIL quotes two plans in columns ("Essential   Extensive") and every
+    "Annual Premium" line carries both figures. The generic premium pattern
+    takes the first column, which is the wrong plan whenever the target is
+    in the second one.
+    """
+    if not text or not str(target_plan or "").strip():
+        return {}
+    target = str(target_plan).strip().casefold()
+    lines = str(text).splitlines()
+    header, col, ncols = None, None, 0
+    for i, line in enumerate(lines):
+        cells = [c.strip() for c in re.split(r"\s{3,}", line.strip()) if c.strip()]
+        if len(cells) < 2 or any(len(c) > 40 or re.search(r"\d", c) for c in cells):
+            continue
+        names = [c.casefold() for c in cells]
+        match = next((j for j, n in enumerate(names) if n == target), None)
+        if match is None:
+            match = next((j for j, n in enumerate(names) if len(n) >= 4 and re.search(rf"\b{re.escape(n)}\b", target)), None)
+        if match is not None:
+            header, col, ncols = i, match, len(cells)
+            break
+    if header is None:
+        return {}
+    for line in lines[header:]:
+        if re.match(r"\s*annual\s+premium", line, re.I):
+            amounts = list(_MONEY_CELL.finditer(line))
+            if len(amounts) == ncols:
+                m = amounts[col]
+                return {"premium": {
+                    "amount": canonical_amount(m.group("amt")),
+                    "currency": _currency_code(m.group("cur")),
+                    "frequency": "Annual",
+                }}
+    return {}
+
+
 def generic_quote_facts(text: str) -> dict:
     facts: dict = {}
     if not text:

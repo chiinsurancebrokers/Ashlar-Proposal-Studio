@@ -8,6 +8,7 @@ isolation, AI analysis and quality scoring.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import tempfile
 
 from .analyzer import analyze_target_plan
@@ -181,6 +182,72 @@ def analyze_option(
     }
     result_row["quality"] = assess_result_quality(result_row)
     return result_row, warnings
+
+
+_NOT_INCLUDED = re.compile(
+    r"^\W*(?:not (?:covered|selected|included|mentioned|specified)|excluded|optional|unclear|none\b|x\b)", re.I
+)
+_MODULES = (("maternity", "Maternity"), ("dental", "Dental"), ("optical", "Optical"))
+
+
+def _module_included(value) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and not _NOT_INCLUDED.search(text)
+
+
+def disambiguate_plan_names(results: list[dict]) -> list[dict]:
+    """Give two options of the same insurer and plan distinct names.
+
+    The same plan is often quoted twice — with and without optional modules
+    (APRIL Essential + maternity + dental/optical vs Essential core). Every
+    report column and plan page is keyed by insurer + plan name, so identical
+    names would overwrite each other. The name gets the modules that differ
+    within the group, then the deductible, then the premium, as needed.
+    """
+    def key(r: dict) -> str:
+        # Insurer (first word) + selected plan tier: the model words the plan
+        # name differently from run to run, the plan selection does not.
+        a = r.get("analysis") or {}
+        insurer = re.split(r"\W+", str(a.get("provider") or r.get("provider") or "").strip().casefold())[0]
+        plan = str(r.get("target_plan") or a.get("plan_name") or "").casefold()
+        return f"{insurer}|{re.sub(r'[^a-z0-9]+', ' ', plan).strip()}"
+
+    groups: dict[str, list[dict]] = {}
+    for r in results:
+        groups.setdefault(key(r), []).append(r)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        benefits = [((r.get("analysis") or {}).get("benefits") or {}) for r in group]
+        differing = [
+            (k, label) for k, label in _MODULES
+            if len({_module_included(b.get(k)) for b in benefits}) > 1
+        ]
+        suffixes = []
+        for r, b in zip(group, benefits):
+            if differing:
+                added = [label for k, label in differing if _module_included(b.get(k))]
+                suffixes.append(" + " + " + ".join(added) if added else " (core cover)")
+            else:
+                suffixes.append("")
+        if len(set(suffixes)) < len(group):
+            for i, r in enumerate(group):
+                a = r.get("analysis") or {}
+                premium = a.get("premium") or {}
+                extra = f"{premium.get('currency') or ''} {premium.get('amount') or ''}".strip()
+                suffixes[i] += f" ({a.get('deductible_or_excess') or extra or r.get('provider')})"
+        # Strip a suffix from an earlier pass so a re-run does not stack them.
+        names = [
+            re.sub(r"(?: \+ (?:Maternity|Dental|Optical))+$| \(core cover\)$", "",
+                   str((r.get("analysis") or {}).get("plan_name") or r.get("target_plan") or "Plan"))
+            for r in group
+        ]
+        base = min(names, key=len)
+        for r, suffix in zip(group, suffixes):
+            a = r.get("analysis")
+            if isinstance(a, dict):
+                a["plan_name"] = f"{base}{suffix}"
+    return results
 
 
 def reanalysis_inputs(result: dict) -> dict:

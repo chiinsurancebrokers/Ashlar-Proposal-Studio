@@ -566,3 +566,50 @@ def test_extraction_mechanics_are_not_shown_to_the_client():
     clean = client_facing_results(results)[0]["analysis"]["benefits"]
     assert "extract" not in clean["maternity"] and "€4,000" in clean["maternity"]
     assert results[0]["analysis"]["benefits"]["maternity"] == text  # stored analysis untouched
+
+
+APRIL_TWO_PLAN_QUOTE = """Summary of your selection
+
+                                         Essential                     Extensive
+
+ Healthcare benefits                                €478,66 /month                         €533,53/month
+
+ Dental/Optical                                         Not selected                              Not selected
+
+ Monthly Premium*                                     €478,91 Incl Tax                           €533,78 Incl Tax
+
+ Annual Premium*                                  €5746,97 Incl Tax                          €6405,41 Incl Tax
+"""
+
+
+def test_side_by_side_quote_takes_the_target_plans_column():
+    from core.analyzer import _apply_deterministic_facts
+    from core.carriers import plan_column_facts
+    assert plan_column_facts(APRIL_TWO_PLAN_QUOTE, "Extensive")["premium"]["amount"] == "6405.41"
+    assert plan_column_facts(APRIL_TWO_PLAN_QUOTE, "ESSENTIAL")["premium"]["amount"] == "5746.97"
+    assert plan_column_facts(APRIL_TWO_PLAN_QUOTE, "Elite") == {}
+    out = _apply_deterministic_facts({"benefits": {}}, "APRIL", APRIL_TWO_PLAN_QUOTE, "", "Extensive")
+    assert out["premium"]["amount"] == "6405.41"
+
+
+def test_same_plan_quoted_twice_gets_distinct_names():
+    from core.case_runner import disambiguate_plan_names
+    rows = [
+        {"provider": "APRIL MYHEALTH ESSENTIAL", "target_plan": "ESSENTIAL", "analysis": {
+            "provider": "APRIL International", "plan_name": "MyHealth International – Essential",
+            "benefits": {"maternity": "Included: €4,000 per pregnancy", "dental": "€1,000 at 80%", "optical": "€200"}}},
+        {"provider": "APRIL MYHEALTH ESSENTIAL - CORE", "target_plan": "Essential", "analysis": {
+            "provider": "APRIL International (MyHealth International)", "plan_name": "MyHealth International 2.0 – Essential",
+            "benefits": {"maternity": "Not selected on this quotation.", "dental": "Not selected", "optical": "Not selected"}}},
+        {"provider": "APRIL MYHEALTH EXTENSIVE", "target_plan": "Extensive", "analysis": {
+            "provider": "APRIL International", "plan_name": "MyHealth International – Extensive", "benefits": {}}},
+    ]
+    disambiguate_plan_names(rows)
+    names = [r["analysis"]["plan_name"] for r in rows]
+    assert names == [
+        "MyHealth International – Essential + Maternity + Dental + Optical",
+        "MyHealth International – Essential (core cover)",
+        "MyHealth International – Extensive",
+    ]
+    disambiguate_plan_names(rows)  # a second pass does not stack suffixes
+    assert [r["analysis"]["plan_name"] for r in rows] == names

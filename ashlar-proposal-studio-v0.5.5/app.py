@@ -28,7 +28,7 @@ from core.email_delivery import EmailDeliveryError, email_delivery_configured, e
 from core.extract import extract_document
 from core.library_classify import canonical_name, guess_doc_type, product_mismatch, table_first
 from core.household import RELATIONSHIPS, SEXES, applicant_details, applicant_row, normalise_members
-from core.case_runner import analyze_option
+from core.case_runner import analyze_option, disambiguate_plan_names
 from core.plan_selector import identify_selected_plan
 from core.quality import assess_result_quality, case_quality
 from core.carriers import get_carrier_adapter
@@ -1960,7 +1960,7 @@ def case_workspace_page() -> None:
                 all_results.append(result_row)
                 progress.progress(idx / len(active), text=f"Completed {slot['label']}")
 
-            st.session_state["results"] = all_results
+            st.session_state["results"] = disambiguate_plan_names(all_results)
             st.session_state["case_chat"] = []
             st.session_state["client_analysis"] = None
             st.session_state["loaded_case_snapshot"] = False

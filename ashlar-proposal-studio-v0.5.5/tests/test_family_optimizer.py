@@ -9,14 +9,14 @@ from core.family_optimizer import (
 )
 
 KATJA = Profile("katja", "Katja", "Greece",
-                (Need("inpatient", MUST), Need("outpatient_visits", MEDIUM), Need("diagnostics", MEDIUM),
+                (Need("inpatient", MUST), Need("outpatient", MEDIUM), Need("diagnostics_imaging", MEDIUM),
                  Need("preventive", LOW)), budget="high")
 
 
 def student(key, name):
     return Profile(key, name, "Germany",
-                   (Need("inpatient", MUST), Need("outpatient_visits", HIGH), Need("mental_health", HIGH),
-                    Need("diagnostics", HIGH), Need("dental", LOW)), budget="normal")
+                   (Need("inpatient", MUST), Need("outpatient", HIGH), Need("mental_health", HIGH),
+                    Need("diagnostics_imaging", HIGH), Need("dental", LOW)), budget="normal")
 
 
 D1, D2 = student("d1", "Daughter 1"), student("d2", "Daughter 2")
@@ -33,19 +33,19 @@ def q(person, insurer, plan, amount, freq="annual", **kw):
 def offers():
     generali = offer_from_quotes("generali", [q("katja", "Generali", "Life On", "180.82", "monthly")],
                                  residences={"Greece"},
-                                 benefits={"inpatient": COVERED, "outpatient_visits": SUB_LIMIT,
-                                           "diagnostics": SUB_LIMIT, "preventive": COVERED})
+                                 benefits={"inpatient": COVERED, "outpatient": SUB_LIMIT,
+                                           "diagnostics_imaging": SUB_LIMIT, "preventive": COVERED})
     vumi = offer_from_quotes("vumi", [q("katja", "VUMI", "Euro Health VIP Priority", "2909.50")],
                              residences={"Greece"},
-                             benefits={"inpatient": COVERED, "outpatient_visits": NOT_COVERED,
-                                       "diagnostics": COVERED, "preventive": SUB_LIMIT,
+                             benefits={"inpatient": COVERED, "outpatient": NOT_COVERED,
+                                       "diagnostics_imaging": COVERED, "preventive": SUB_LIMIT,
                                        "mental_health": SUB_LIMIT, "dental": SUB_LIMIT})
     img = [offer_from_quotes(f"img-{p}", [q(p, "IMG", "Global Prima Bronze Plus", "1338.61")],
                              residences=IMG_AREA, benefits=IMG_BENEFITS) for p in ("d1", "d2")]
     april = [offer_from_quotes(f"april-{p}", [q(p, "APRIL", "International", "1633.00")],
                                residences={"Germany"},
-                               benefits={"inpatient": COVERED, "outpatient_visits": NOT_COVERED,
-                                         "diagnostics": NOT_COVERED, "mental_health": NOT_COVERED,
+                               benefits={"inpatient": COVERED, "outpatient": NOT_COVERED,
+                                         "diagnostics_imaging": NOT_COVERED, "mental_health": NOT_COVERED,
                                          "dental": NOT_COVERED}) for p in ("d1", "d2")]
     family = offer_from_quotes("img-family", [q(p, "IMG", "Global Prima Bronze Plus", "0")
                                               for p in ("katja", "d1", "d2")],
@@ -80,12 +80,12 @@ def test_unknown_benefit_is_not_credited():
     img = offers()[2]
     fit = person_fit(D1, img)
     assert fit.eligible
-    assert set(fit.unknown) == {"outpatient_visits", "mental_health", "diagnostics", "dental"}
+    assert set(fit.unknown) == {"outpatient", "mental_health", "diagnostics_imaging", "dental"}
     assert fit.value == round(3 / 13, 4)
 
 
 def test_must_not_covered_makes_an_offer_ineligible():
-    needs_outpatient = Profile("d1", "Daughter 1", "Germany", (Need("outpatient_visits", MUST),))
+    needs_outpatient = Profile("d1", "Daughter 1", "Germany", (Need("outpatient", MUST),))
     april = offers()[4]
     fit = person_fit(needs_outpatient, april)
     assert not fit.eligible and "must have" in fit.reasons[0]

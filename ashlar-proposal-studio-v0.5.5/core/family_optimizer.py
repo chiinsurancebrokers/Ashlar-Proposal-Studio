@@ -76,7 +76,7 @@ class Offer:
     label: str
     persons: tuple[str, ...]
     yearly: Decimal
-    residences: frozenset[str]             # countries of residence the plan accepts
+    residences: frozenset[str]             # countries of residence the plan accepts; "*" means any
     benefits: Mapping[str, str] = field(default_factory=dict)  # benefit -> COVERED / SUB_LIMIT / ...
     quotes: tuple[PersonQuote, ...] = ()
     stand_in: bool = False
@@ -109,7 +109,7 @@ Resolution = Mapping[tuple[str, str], float]  # (plan_key, benefit) -> credit
 
 
 def person_fit(profile: Profile, offer: Offer, resolved: Resolution | None = None) -> Fit:
-    if profile.residence.casefold() not in offer.residences:
+    if "*" not in offer.residences and profile.residence.casefold() not in offer.residences:
         return Fit(0.0, False, (), (f"{offer.label} does not cover residence in {profile.residence}.",))
     earned = total = 0.0
     unknown: list[str] = []

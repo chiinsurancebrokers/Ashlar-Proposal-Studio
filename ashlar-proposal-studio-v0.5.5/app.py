@@ -2068,7 +2068,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "Navigation",
-        ["◈ Case Studio", "▤ Saved Cases", "▣ Admin Library"],
+        ["◈ Case Studio", "⌘ Family Mix", "▤ Saved Cases", "▣ Admin Library"],
         label_visibility="collapsed",
         key="nav_page",
     )
@@ -2080,6 +2080,10 @@ with st.sidebar:
 
 if page == "▣ Admin Library":
     provider_library_page()
+elif page == "⌘ Family Mix":
+    from family_mix_page import family_mix_page
+
+    family_mix_page(page_header)
 elif page == "▤ Saved Cases":
     saved_cases_page()
 else:

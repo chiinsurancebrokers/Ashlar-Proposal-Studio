@@ -52,3 +52,31 @@ def test_open_points_name_what_the_quote_does_not_show():
     outcome, people = _outcome()
     html = render_family_study(outcome, people, lang="en")
     assert "does not show" in html and "IMG Bronze Plus" in html
+
+
+def test_generali_gets_hospital_waiting_table_and_rider_adds_second():
+    outcome, people = _outcome()
+    html = render_family_study(outcome, people, lang="en")
+    assert "Hospital Premium Flexi (Article 5)" in html and "Spinal conditions" in html
+    assert "Doctors &amp; Exams" not in html
+    html2 = render_family_study(outcome, people, lang="en", riders={"Generali Life On": ["doctors_exams_premium"]})
+    assert "Doctors &amp; Exams Premium (Article 3)" in html2 and "Knee conditions" in html2
+    el = render_family_study(outcome, people, lang="el")
+    assert "Παθήσεις σπονδυλικής στήλης" in el and "Περίοδοι αναμονής" in el
+
+
+def test_mix_record_is_plain_data_without_amount_guesses():
+    import json
+    from core.family_study import mix_record
+    outcome, people = _outcome()
+    rec = mix_record(outcome, people, lang="el", budget_cap=4000)
+    json.dumps(rec)
+    assert rec["total_yearly"] == "3508.45" and rec["broker_reviewed"] is False
+    assert {o["plan"] for o in rec["offers"]} == {"Generali Life On", "IMG Bronze Plus"}
+
+
+def test_save_family_mix_needs_a_case(monkeypatch):
+    import pytest
+    from core.case_archive import CaseArchiveError, save_family_mix
+    with pytest.raises(CaseArchiveError):
+        save_family_mix("", {})

@@ -12,7 +12,10 @@ from core.family_bridge import (
     BENEFITS, WEIGHTS, person_key, plan_display, run_family_mix,
 )
 from core.family_mix import Person, check_scenario
+from core.case_archive import CaseArchiveError, archive_configured, save_family_mix
 from core.family_optimizer import as_scenario, explain, optimise
+from core.family_study import mix_record, render_family_study
+from core import waiting_periods
 
 NEED_CHOICES = [""] + list(WEIGHTS)
 BUDGET_CHOICES = ["High", "Normal", "Low"]
@@ -77,9 +80,17 @@ def family_mix_page(page_header=None) -> None:
         assignments[i] = [person_key(n) for n in chosen]
         residences[i] = [w.strip() for w in where.split(",") if w.strip()]
 
+    riders: dict[str, list[str]] = {}
+    for i, result in enumerate(results):
+        if "generali" in plan_display(result).lower():
+            if st.checkbox(f"{plan_display(result)} includes Doctors & Exams Premium", key=f"fm_rider_{i}",
+                           help="Tick only if the quote you hold includes this add-on. It adds its own waiting-period table to the study."):
+                riders[plan_display(result)] = [waiting_periods.DOCTORS]
+
     cap = st.number_input("Yearly budget for the household (0 for none)", min_value=0, step=100, key="fm_cap")
 
     if not st.button("Find the best combination", type="primary", key="fm_run"):
+        _study_actions()      # a download or save click reruns the page; keep the last search usable
         return
 
     outcome, profiles, notes = run_family_mix(
@@ -113,6 +124,9 @@ def family_mix_page(page_header=None) -> None:
         for flag in flags:
             st.caption(f"{flag.severity}: {flag.message}")
 
+    st.session_state["fm_last"] = {"outcome": outcome, "profiles": profiles, "riders": riders, "cap": cap}
+    _study_actions()
+
     st.subheader("All combinations")
     st.caption("Sorted by utility: household fit minus a price penalty. Fit is between 0 and 1.")
     table = pd.DataFrame([{
@@ -122,3 +136,29 @@ def family_mix_page(page_header=None) -> None:
     } for s in outcome.ranked[:15]])
     st.dataframe(table, use_container_width=True, hide_index=True)
     st.caption("A licensed Ashlar broker reviews every recommendation before anything is placed.")
+
+
+def _study_actions() -> None:
+    """Produce the client study and save the chosen combination, from the last search."""
+    last = st.session_state.get("fm_last")
+    if not last:
+        return
+    outcome, profiles = last["outcome"], last["profiles"]
+    st.subheader("Client study")
+    lang_label = st.radio("Language", ["Greek", "English"], horizontal=True, key="fm_lang")
+    lang = "el" if lang_label == "Greek" else "en"
+    html = render_family_study(outcome, profiles, lang=lang, client_name=st.session_state.get("client_name") or "",
+                               riders=last["riders"])
+    st.download_button("Download the client study (HTML)", html.encode("utf-8"),
+                       file_name=f"family-study-{lang}.html", mime="text/html", key="fm_download")
+    st.caption("Review it before it goes to the client. It shows states, not invented prices.")
+    if st.button("Save this combination to the case", key="fm_save"):
+        if not archive_configured():
+            st.error("The case archive is not configured, so nothing was saved.")
+            return
+        try:
+            save_family_mix(st.session_state.get("current_case_id"),
+                            mix_record(outcome, profiles, lang=lang, budget_cap=last["cap"] or None))
+            st.success("Saved with the case.")
+        except CaseArchiveError as exc:
+            st.error(str(exc))

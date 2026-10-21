@@ -14,6 +14,7 @@ from typing import Sequence
 
 from core.benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT, UNKNOWN
 from core.family_bridge import BENEFITS
+from core import waiting_periods
 from core.family_optimizer import MUST, Profile, Result, Selection
 
 _STRINGS = {
@@ -38,6 +39,7 @@ _STRINGS = {
         "fair1": "A licensed Ashlar broker reviews every recommendation before anything is placed.",
         "fair2": "Prices come from the insurers' own quotes, never from an AI estimate. Benefit summaries are simplified from the insurers' documents; the policy wording prevails.",
         "fair3": "Not everyone needs international cover. If a local plan fits, we say so. The public health system remains an essential safety net. This is not an offer of cover. Final eligibility, terms and premium are confirmed by each insurer after underwriting, and nothing is assumed about pre-existing conditions until the insurer confirms in writing.",
+        "waiting": "Waiting periods", "condition": "Condition", "covered_after": "Covered after",
         "nl": ".", "dec": ".", "thou": ",",
     },
     "el": {
@@ -62,6 +64,7 @@ _STRINGS = {
         "fair1": "Κάθε πρόταση ελέγχεται από αδειοδοτημένο ασφαλιστικό διαμεσολαβητή της Ashlar πριν την τοποθέτηση.",
         "fair2": "Οι τιμές προέρχονται από τις προσφορές των ίδιων των ασφαλιστικών εταιριών και όχι από εκτίμηση της AI. Η περίληψη παροχών βασίζεται στα έγγραφα των ασφαλιστών. Το ασφαλιστήριο συμβόλαιο είναι η τελική πηγή.",
         "fair3": "Δεν χρειάζονται όλοι διεθνή κάλυψη. Αν ταιριάζει ένα τοπικό πρόγραμμα, θα το πούμε. Το δημόσιο σύστημα υγείας παραμένει απαραίτητο δίχτυ ασφαλείας. Πρόκειται για προκαταρκτική σύγκριση και όχι για προσφορά κάλυψης. Η τελική επιλεξιμότητα, οι όροι και το ασφάλιστρο επιβεβαιώνονται από κάθε ασφαλιστική εταιρία μετά την ανάληψη κινδύνου. Καμία προϋπάρχουσα πάθηση δεν θεωρείται δεδομένη μέχρι να το επιβεβαιώσει γραπτώς η ασφαλιστική εταιρία.",
+        "waiting": "Περίοδοι αναμονής", "condition": "Πάθηση", "covered_after": "Καλύπτεται μετά",
         "nl": ".", "dec": ",", "thou": ".",
     },
 }
@@ -139,7 +142,8 @@ def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str) -> li
 
 
 def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: str = "en",
-                        client_name: str = "", on: date | None = None, top: int = 6) -> str:
+                        client_name: str = "", on: date | None = None, top: int = 6,
+                        riders: dict | None = None) -> str:
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -191,6 +195,20 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     reasons = "".join(f"<li>{e(line)}</li>" for line in _reasons(best, prof, lang))
     conf = confirmations(outcome, profiles, lang)
     conf_html = ("<ul>" + "".join(f"<li>{e(c)}</li>" for c in conf) + "</ul>") if conf else f"<p>{e(s['none_confirm'])}</p>"
+    waiting_html = ""
+    shown: list[str] = []
+    for offer in best.offers:
+        for key in waiting_periods.tables_for(offer.label, (riders or {}).get(offer.label, ())):
+            if key in shown:
+                continue
+            shown.append(key)
+            t = waiting_periods.TABLES[key]
+            waiting_html += (f"<h2>{e(t['title'][lang])}</h2><p>{e(t['intro'][lang])}</p>"
+                             + _table([s["condition"], s["covered_after"]],
+                                      [[e(a), e(b)] for a, b in waiting_periods.rows(key, lang)]))
+    if waiting_html:
+        waiting_html = (f'<section class="page"><div class="eyebrow">{e(s["eyebrow"])} / 03</div>'
+                        f'<h1>{e(s["waiting"])}</h1>{waiting_html}</section>')
     today = _fmt_date(on or date.today(), lang)
     who = f"<b>{e(client_name)}</b> | " if client_name else ""
 
@@ -202,8 +220,8 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
 <p>{_money(best.total, s)} {e(s['per_year'])}, {_money(best.total / 12, s)} {e(s['per_month'])}.</p>
 <h2>{e(s['why'])}</h2><ul>{reasons}</ul></section>
 <section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 02</div><h1>{e(s['benefits'])}</h1>{benefits}</section>
-<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 03</div><h1>{e(s['all'])}</h1>{others}<p class="note">{e(s['sorted'])}</p></section>
-<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 04</div><h1>{e(s['confirm'])}</h1>{conf_html}
+{waiting_html}<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 04</div><h1>{e(s['all'])}</h1>{others}<p class="note">{e(s['sorted'])}</p></section>
+<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 05</div><h1>{e(s['confirm'])}</h1>{conf_html}
 <p class="note">{e(s['fair1'])}</p><p class="note">{e(s['fair2'])}</p><p class="note">{e(s['fair3'])}</p></section>
 <footer>Ashlar Assurance | {e(today)}</footer></main></body></html>"""
 
@@ -221,3 +239,26 @@ def _reasons(best: Selection, prof: dict, lang: str) -> list[str]:
                 parts.append(f"{_benefit(need.benefit, lang)}{tag}: {s[_STATE_KEY[state]].lower()}")
             lines.append(f"{p.name}: {offer.label}. " + "; ".join(parts) + ("." if parts else ""))
     return lines
+
+
+def mix_record(outcome: Result, profiles: Sequence[Profile], *, lang: str = "en", budget_cap=None) -> dict:
+    """The chosen combination as plain data for the case record. Needs a winner."""
+    best = outcome.winner
+    if best is None:
+        raise ValueError("No winning combination to record.")
+    name = {p.person: p.name for p in profiles}
+    return {
+        "version": 1,
+        "saved_at": date.today().isoformat(),
+        "language": lang,
+        "label": best.label,
+        "total_yearly": str(best.total),
+        "total_monthly": str((best.total / 12).quantize(Decimal("0.01"))),
+        "budget_cap": str(budget_cap) if budget_cap else None,
+        "offers": [{"plan": o.label, "yearly": str(o.yearly), "persons": [name.get(x, x) for x in o.persons]}
+                   for o in best.offers],
+        "robust": bool(outcome.robust),
+        "to_confirm": [f"{b} ({o})" for o, b in best.unknown],
+        "flips": [{"plan": f.plan_key, "benefit": f.benefit, "winner_if_covered": f.new_winner} for f in outcome.flips],
+        "broker_reviewed": False,
+    }

@@ -67,7 +67,7 @@ _CARRIERS = ", ".join(INTERNATIONAL_CARRIERS[:-1]) + " and " + INTERNATIONAL_CAR
 
 DISCLOSURE = ("I handle English-language enquiries for Generali Greece. Ashlar Assurance also works with the leading "
               "insurers, so I can compare other options for you. We are paid only by commission from the insurer whose "
-              "policy you choose, and we do not charge you any fee. [CONFIRM your exact regulatory status wording]")
+              "policy you choose, and we do not charge you any fee.")
 
 
 @dataclass
@@ -130,34 +130,70 @@ def route(text: str) -> Routing:
     return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)))
 
 
-def draft_reply(r: Routing, name: str = "", family: str = "") -> str:
-    """A first draft for the broker to edit. Known facts only; everything else is a [CONFIRM] marker."""
+# The numbered questions in the reply the broker actually sent for lead 001 (approved example).
+ASKS = [
+    "Dates of birth and nationalities of everyone to be insured",
+    "Any existing conditions or ongoing treatment",
+    "Hospitals or doctors you would like to keep using",
+    "Whether you want cover in Greece only, Europe, or worldwide",
+    "Any extras you want, such as maternity, dental, or check-ups",
+    "Your approximate annual budget",
+    "Your preferred start date",
+]
+AFM_ASK = "Whether each adult holds a valid Greek AFM (Generali requires one)"
+
+# What an international plan can offer for each gap. Waiting periods are never promised away.
+_IPMI_POINTS = {
+    "free_doctor_choice": "Free choice of private hospitals and doctors, with no need for public hospitals or EOPYY",
+    "enriched_outpatient": "Outpatient cover for doctors, specialists, diagnostics and prescriptions, with emergency care including visits where admission is not required",
+    "zero_deductible": "Low or zero deductible options",
+    "cover_abroad": "Cover and direct billing outside Greece, in Europe or worldwide",
+    "no_waiting_periods": "Waiting periods that vary by plan; we will show them for every option",
+}
+
+
+def draft_reply(r: Routing, name: str = "") -> str:
+    """A first draft for the broker to edit. Follows the structure of the approved example; facts the
+    broker has not confirmed are [CONFIRM] markers, never filled in."""
     who = f"Dear {name}," if name else "Hello,"
-    out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, ""]
+    asks = list(ASKS)
+    if r.afm != "has":
+        asks.insert(1, AFM_ASK)
+    questions = [f"{i}. {a}" for i, a in enumerate(asks, 1)]
 
     if r.track == INTERNATIONAL:
-        out += ["Generali's plans are local Greek policies and can only be issued to someone with a valid Greek tax number (AFM). "
-                "Since you do not have one, Generali is not an option for you at this stage. "
-                "If that changes, I would be glad to revisit it.", "",
-                f"What I can do is compare international health plans for you from providers such as {_CARRIERS}.", ""]
-    else:
-        out += ["Generali Life On is a hospital-focused plan with a EUR 1,500 participation (a cost share, not an excess). "
-                "It suits a family that wants a strong hospital cover at a sensible price. "
-                "An optional Doctors & Exams add-on extends it to doctor visits and tests. "
-                "[CONFIRM plan names, direct-billing hospital list and out-of-network reimbursement before sending]", ""]
-        if r.track == MIXED:
-            out += ["From your message, the following go beyond what Life On offers, so I want to be upfront about it:"]
-            out += [f"- {h.label}" for h in r.gaps]
-            out += ["", "If those matter most to you, an international health plan is the better fit, and I can put the two options "
-                    f"side by side with prices, deductibles, waiting periods and exclusions so you can choose. "
-                    f"I can compare providers such as {_CARRIERS}.", ""]
+        out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
+               "Generali's plans are local Greek policies and can only be issued to someone with a valid Greek tax number (AFM). "
+               "Since you do not have one, Generali is not an option for you at this stage. If that changes, I would be glad to revisit it.", "",
+               f"What I can do is compare international health plans for you from providers such as {_CARRIERS}.", ""]
+    elif r.track == GENERALI:
+        out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
+               "Generali Life On is a hospital-focused plan with a EUR 1,500 participation (a cost share, not an excess). "
+               "It suits anyone who wants strong hospital cover at a sensible price. "
+               "An optional Doctors & Exams add-on extends it to doctor visits and tests. "
+               "[CONFIRM plan names, direct-billing hospital list and out-of-network reimbursement before sending]", ""]
+        if r.reviews:
+            out += ["I will also check the policy wording on: " + "; ".join(h.label.lower() for h in r.reviews) + ".", ""]
+    else:  # MIXED
+        network = any(h.rule in ("free_doctor_choice", "enriched_outpatient") for h in r.gaps)
+        wants = "; ".join(h.label[0].lower() + h.label[1:] for h in r.gaps)
+        out = [who, "",
+               "Thank you for your enquiry and for considering Generali. Generali is a well-known insurer in Greece, distinguished for its hospital cover.", "",
+               "To be fully transparent about your requirements: Generali's programmes cover hospitalisation in Greece very well."
+               + (" Emergencies, and visits to doctors and specialists, are covered only within their preferred network, "
+                  "so routine visits to private doctors and specialists of your own choice are not included." if network else ""), "",
+               f"Since you are looking for: {wants}, I would recommend an international private medical insurance (IPMI) plan, "
+               "and for this reason your enquiry has been passed to me.", "",
+               "At Ashlar we work with Generali in the Greek market, and we also have direct agreements with many IPMI providers, "
+               f"so we can compare both routes for you, including {_CARRIERS}. " + DISCLOSURE.split("Ashlar Assurance also works with the leading insurers, so I can compare other options for you. ")[1], "",
+               "IPMI plans can combine:"]
+        out += [f"* {_IPMI_POINTS[h.rule]}" for h in r.gaps if h.rule in _IPMI_POINTS] + [""]
+        out += ["If these are not a high priority, we can instead provide a Generali hospital cover quotation alongside the IPMI one, "
+                "so you can compare both and decide what suits you best." + (" Generali requires a valid Greek AFM for each adult." if r.afm != "has" else ""), "",
+                "For each option we will provide the participating hospital list, direct-billing arrangements, reimbursement for "
+                "out-of-network doctors, waiting periods, exclusions and annual limits.", ""]
         if r.reviews:
             out += ["I will also check the policy wording on: " + "; ".join(h.label.lower() for h in r.reviews) + ".", ""]
 
-    asks = ["Full names and dates of birth of everyone to be insured",
-            "Country of residence and intended start date",
-            "Any existing medical conditions or past treatment (needed for underwriting)"]
-    if r.afm != "has":
-        asks.insert(1, "Whether each adult holds a valid Greek AFM")
-    out += ["To prepare a quotation I need:"] + [f"- {a}" for a in asks] + ["", "Kind regards,"]
+    out += ["To prepare a quotation, please send us:"] + questions + ["", "Kind regards,"]
     return "\n".join(out)

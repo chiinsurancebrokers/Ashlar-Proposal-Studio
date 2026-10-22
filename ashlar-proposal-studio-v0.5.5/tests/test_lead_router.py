@@ -62,8 +62,10 @@ def test_waiver_and_zero_deductible_requests():
 
 def test_draft_never_invents_facts_and_asks_for_afm_when_unknown():
     d = draft_reply(route(LEAD_FAMILY))
-    assert "[CONFIRM" in d and "Greek AFM" in d and "commission" in d
-    assert "EUR 1,500" in d
+    assert "Greek AFM" in d and "commission" in d and "no fee" not in d
+    assert "EUR 1,500" not in d  # the mixed reply does not quote Life On figures it was not asked for
+    g = draft_reply(route("I live in Athens and have an AFM. I want hospital cover."))
+    assert "[CONFIRM" in g and "EUR 1,500" in g
 
 
 def test_international_draft_does_not_pitch_life_on():

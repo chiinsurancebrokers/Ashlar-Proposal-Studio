@@ -110,7 +110,7 @@ BRIDGE = ("As we have been serving expats and affluent Greeks for many years, wo
           "providers, we have established a strategic collaboration with Generali, so we can guide you to the best insurance solution "
           "for your health needs and priorities. Ashlar Assurance is an independent insurance intermediary. We are not employed by "
           "Generali and have no employment relationship with it. We are " + REGISTRATION + ", and we are responsible for the advice "
-          "and service we give you.")
+          "and service we give you. Chris Iatropoulos holds the Chartered Insurance Institute's Award in General Insurance (March 2025).")
 COMMISSION = ("We are paid only by commission from the insurer whose policy you choose, and we do not charge you any fee.")
 DISCLOSURE = (BRIDGE + " " + COMMISSION)
 

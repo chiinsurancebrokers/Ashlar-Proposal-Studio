@@ -106,11 +106,12 @@ _CARRIERS = ", ".join(INTERNATIONAL_CARRIERS[:-1]) + " and " + INTERNATIONAL_CAR
 # name of Christos Iatropoulos; the trading name Ashlar Assurance is not on either certificate.
 REGISTRATION = ("registered with the Athens Chamber of Commerce and Industry in the Special Register of Insurance Intermediaries "
                 "(registry no. 191526, GEMI 061564903000, in the name of Christos Iatropoulos)")
+BRIDGE_STATUS = ("Ashlar Assurance is an independent insurance intermediary. We are not employed by Generali and have no employment "
+                 "relationship with it. We are " + REGISTRATION + ", and we are responsible for the advice and service we give you. "
+                 "Chris Iatropoulos holds the Chartered Insurance Institute's Award in General Insurance (March 2025).")
 BRIDGE = ("As we have been serving expats and affluent Greeks for many years, working with top-tier international health insurance "
           "providers, we have established a strategic collaboration with Generali, so we can guide you to the best insurance solution "
-          "for your health needs and priorities. Ashlar Assurance is an independent insurance intermediary. We are not employed by "
-          "Generali and have no employment relationship with it. We are " + REGISTRATION + ", and we are responsible for the advice "
-          "and service we give you. Chris Iatropoulos holds the Chartered Insurance Institute's Award in General Insurance (March 2025).")
+          "for your health needs and priorities. " + BRIDGE_STATUS)
 COMMISSION = ("We are paid only by commission from the insurer whose policy you choose, and we do not charge you any fee.")
 DISCLOSURE = (BRIDGE + " " + COMMISSION)
 
@@ -131,6 +132,8 @@ class Routing:
     asked_for_life_on: bool = False
     requests: list[str] = field(default_factory=list)
     plans: list[str] = field(default_factory=list)  # Generali plans the lead names; empty = none named
+    mentions_eopyy: bool = False
+    family: bool = False
 
     @property
     def gaps(self) -> list[Hit]:
@@ -176,7 +179,9 @@ def route(text: str) -> Routing:
         track = GENERALI
     requests = [rid for rid, _, _, pats in REQUEST_RULES if _first(pats, sents)]
     plans = [p for p, pat in ((LIFE_ON, r"life[\s-]*on"), (MEDICAL_PRIME, r"medical[\s-]*prime")) if re.search(pat, text, re.I)]
-    return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)), requests=requests, plans=plans)
+    return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)), requests=requests, plans=plans,
+                   mentions_eopyy=bool(re.search(r"eopyy|e\.o\.p\.y\.y", text, re.I)),
+                   family=bool(re.search(r"\bfamil|children|\bkids\b|\bspouse|\bwife\b|\bhusband", text, re.I)))
 
 
 # The numbered questions in the broker's own reply to lead 001.

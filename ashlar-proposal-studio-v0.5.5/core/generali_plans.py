@@ -161,3 +161,48 @@ def wording_for(plans: list[str]) -> dict[str, tuple[str, str]]:
         text = " ".join(f"{PLAN_NAMES[p]}: {t}" for p, (k, t) in rows if t)
         out[rid] = ("partial" if worst == "not_offered" and text else worst, text)
     return out
+
+
+# Structured Life On facts for the HTML email (plain text; the renderer escapes it). Same figures as LIFE_ON_POINTS.
+LIFE_ON_ROWS = [
+    ("Hospital cover", "Hospital Premium Flexi, with an annual capital of €620,000, €940,000 or €1,240,000 per person."),
+    ("Reimbursement", "100% in Greece and abroad (95% in the USA and Canada) after your participation, and 100% with no participation in public hospitals."),
+    ("Participation", "You choose it: €0, €750, €1,500, €3,000, €5,000 or €10,000 a year. A higher participation lowers the premium. "
+                      "With €750 or €1,500, the seven listed serious-illness categories carry no participation."),
+    ("Direct payment", "Generali pays partner hospitals directly, so you pay only your participation."),
+    ("With EOPYY", "You can combine Life On with a public or private insurer such as EOPYY. If the other insurer pays more than your "
+                   "participation, a bonus of up to €5,000 a year applies."),
+    ("Your room", "Room A (private) or room B (semi-private). Room A carries a higher premium than the same cover with room B. "
+                  "Our reference quotation is for room A."),
+]
+LIFE_ON_MODULE_ROWS = [
+    ("Doctors & Exams Premium", "Unlimited visits to partner doctors at €20 per visit. A family doctor at €40 for the first visit and €12 after that. "
+        "Four visits a year to a doctor of your own choice outside the network, reimbursed up to €20 a visit. Diagnostic tests at partner "
+        "diagnostic centres up to €2,500 a year with no participation, on referral from a partner doctor."),
+    ("Prevention Standard", "An annual check-up (19 tests for adults, 11 for children), with other preventive exams at preferential prices."),
+]
+LIFE_ON_AROUND = [
+    "Doctor visits and tests up to 30 days before the stay, and medication, lab tests and physiotherapy up to 60 days after it",
+    "Day surgery with no participation", "A private nurse for up to 30 days",
+    "Emergency medical transport up to €5,000 a year in Greece and the EU",
+    "A second medical opinion for 13 serious conditions, up to twice per condition",
+    "Continued cover for protected members without a new health check",
+    "Preventive mastectomy, or ovary and tube removal, up to €5,000 (once), and breast reconstruction up to €5,000 (once)",
+    "Psychological support at €50 a session, for up to 10 sessions", "Legal expenses up to €3,000 a year",
+    "Emergencies without admission up to €500 per incident, and listed medical procedures up to €1,000 a year, at special partner hospitals with no participation",
+    "A newborn allowance of €1,200 in the third insurance year and €1,800 in the fourth",
+]
+LIFE_ON_NO_EXPENSES = ["A daily allowance of €100 (€150 in intensive care) for up to 15 days",
+                       "A surgery allowance from €100 to €2,000, depending on the class of operation"]
+LIFE_ON_WAIT_ROWS = [
+    ("Appendectomy", "The first three months of the first year"), ("Nasal growths and tonsillectomy", "The first year"),
+    ("Bowel and genital conditions (except malignancy), pregnancy complications", "The first two years"),
+    ("Deviated septum, spinal conditions, removal of moles and papillomas", "The first three years"),
+    ("Doctors & Exams Premium: spinal and knee conditions", "After the first year"),
+    ("Optional dental cover", "After two years"), ("Optional aesthetic medicine", "After three years"),
+]
+# Generali pages (Greek). The policy wording itself is issued with the quotation.
+URL_DOCS = "https://www.generali.gr/el/eksyphrethsh-pelatwn/enimerotika-eggrafa/"
+URL_HOSPITALS = "https://www.generali.gr/el/eksyphrethsh-pelatwn/synergazomena-nosileytika-idrymata/"
+URL_DIAGNOSTICS = "https://www.generali.gr/el/eksyphrethsh-pelatwn/symvevlimena-diagnwstika-kentra/"
+URL_LIFE_ON = "https://www.generali.gr/el/idiwtiki-asfaleia-ugeias/life-on-programma-asfalishs-ygeias/"

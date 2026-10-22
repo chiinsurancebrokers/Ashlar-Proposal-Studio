@@ -60,6 +60,11 @@ AFM_NONE = [
 ]
 AFM_HAS = [r"\ba\.?f\.?m\.?\b", r"greek\s+tax\s+(id|number)", r"tax\s+resident\s+in\s+greece", r"\bvat\s+number\b"]
 
+# International carriers Ashlar can compare. Edit here to change who the drafts name.
+INTERNATIONAL_CARRIERS = ("VUMI", "Bupa", "Cigna", "Allianz Worldwide Care", "IMG", "APRIL International",
+                          "OneHealth", "Now Health", "Morgan Price")
+_CARRIERS = ", ".join(INTERNATIONAL_CARRIERS[:-1]) + " and " + INTERNATIONAL_CARRIERS[-1]
+
 DISCLOSURE = ("I handle English-language enquiries for Generali Greece. Ashlar Assurance also works with the leading "
               "insurers, so I can compare other options for you. We are paid only by commission from the insurer whose "
               "policy you choose, and we do not charge you any fee. [CONFIRM your exact regulatory status wording]")
@@ -134,7 +139,7 @@ def draft_reply(r: Routing, name: str = "", family: str = "") -> str:
         out += ["Generali's plans are local Greek policies and can only be issued to someone with a valid Greek tax number (AFM). "
                 "Since you do not have one, Generali is not an option for you at this stage. "
                 "If that changes, I would be glad to revisit it.", "",
-                "What I can do is compare international health plans for you. [CONFIRM which carriers and plans to name]", ""]
+                f"What I can do is compare international health plans for you from providers such as {_CARRIERS}.", ""]
     else:
         out += ["Generali Life On is a hospital-focused plan with a EUR 1,500 participation (a cost share, not an excess). "
                 "It suits a family that wants a strong hospital cover at a sensible price. "
@@ -144,8 +149,8 @@ def draft_reply(r: Routing, name: str = "", family: str = "") -> str:
             out += ["From your message, the following go beyond what Life On offers, so I want to be upfront about it:"]
             out += [f"- {h.label}" for h in r.gaps]
             out += ["", "If those matter most to you, an international health plan is the better fit, and I can put the two options "
-                    "side by side with prices, deductibles, waiting periods and exclusions so you can choose. "
-                    "[CONFIRM which international plan to name]", ""]
+                    f"side by side with prices, deductibles, waiting periods and exclusions so you can choose. "
+                    f"I can compare providers such as {_CARRIERS}.", ""]
         if r.reviews:
             out += ["I will also check the policy wording on: " + "; ".join(h.label.lower() for h in r.reviews) + ".", ""]
 

@@ -61,7 +61,7 @@ AFM_NONE = [
 AFM_HAS = [r"\ba\.?f\.?m\.?\b", r"greek\s+tax\s+(id|number)", r"tax\s+resident\s+in\s+greece", r"\bvat\s+number\b"]
 
 # International carriers Ashlar can compare. Edit here to change who the drafts name.
-INTERNATIONAL_CARRIERS = ("VUMI", "Bupa", "Cigna", "Allianz Worldwide Care", "IMG", "APRIL International",
+INTERNATIONAL_CARRIERS = ("VUMI", "Bupa", "Cigna", "Allianz Care", "IMG", "APRIL International",
                           "OneHealth", "Now Health", "Morgan Price")
 _CARRIERS = ", ".join(INTERNATIONAL_CARRIERS[:-1]) + " and " + INTERNATIONAL_CARRIERS[-1]
 

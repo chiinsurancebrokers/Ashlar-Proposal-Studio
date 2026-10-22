@@ -186,3 +186,12 @@ def test_zero_deductible_is_not_a_reason_to_leave_generali():
 def test_lead_with_foreign_hospital_abroad_is_told_no_direct_billing_abroad_for_medical_prime():
     from core.generali_plans import MEDICAL_PRIME, wording_for
     assert "no direct billing abroad" in wording_for([MEDICAL_PRIME])["overseas"][1]
+
+
+def test_every_track_says_why_the_lead_reached_ashlar_without_implying_a_tie_to_generali():
+    for text in (LEAD_FAMILY, "I have no AFM. I want hospital cover.", "I live in Athens and have an AFM. I want hospital cover."):
+        d = draft_reply(route(text))
+        assert "independent insurance broker" in d and "not employed by Generali" in d
+        assert "we, not Generali, are responsible" in d and "[CONFIRM: add Ashlar's broker registration number]" in d
+        for banned in ("on behalf of Generali", "our Generali team", "I handle English-language enquiries for Generali", "passed to me"):
+            assert banned not in d

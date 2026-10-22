@@ -133,9 +133,11 @@ def test_acknowledgement_is_short_and_asks_the_afm_question_once():
 
 
 def test_generali_side_never_promises_what_its_wording_does_not_offer():
-    from core.lead_router import GENERALI_WORDING, generali_promises, coverage
+    from core.generali_plans import wording_for
+    from core.lead_router import generali_promises, coverage
     for lead in (LEAD_FAMILY, LEAD_COUPLE):
         r = route(lead)
+        GENERALI_WORDING = wording_for(r.plans)
         promised = generali_promises(r)
         # nothing the wording does not offer, and nothing partial, is promised for Generali
         assert all(GENERALI_WORDING[x][0] in ("wording", "confirm") for x in promised)
@@ -149,5 +151,36 @@ def test_generali_side_never_promises_what_its_wording_does_not_offer():
 
 
 def test_every_request_has_a_generali_position():
-    from core.lead_router import GENERALI_WORDING, REQUEST_RULES
-    assert {rid for rid, *_ in REQUEST_RULES} <= set(GENERALI_WORDING)
+    from core.generali_plans import PLAN_WORDING
+    from core.lead_router import REQUEST_RULES
+    for plan, table in PLAN_WORDING.items():
+        assert {rid for rid, *_ in REQUEST_RULES} <= set(table), plan
+
+
+def test_plans_are_kept_apart_and_only_named_plans_appear():
+    from core.generali_plans import LIFE_ON, MEDICAL_PRIME, LIFE_ON_PARTICIPATION, wording_for
+    assert route(LEAD_FAMILY).plans == [] and route(LEAD_COUPLE).plans == [LIFE_ON, MEDICAL_PRIME]
+    assert LIFE_ON_PARTICIPATION == (0, 750, 1500, 3000, 5000, 10000)
+    # the doctors-outside-the-network position differs by plan
+    assert wording_for([LIFE_ON])["out_of_network"][0] == "partial"
+    assert wording_for([MEDICAL_PRIME])["out_of_network"][0] == "not_offered"
+    both = wording_for([LIFE_ON, MEDICAL_PRIME])["out_of_network"]
+    assert both[0] == "partial" and "Life On:" in both[1] and "Medical Prime:" in both[1]
+    assert wording_for([LIFE_ON])["direct_billing"][0] == "wording"
+    d_life = draft_reply(route("I want Life On hospital cover and free choice of doctors. I have an AFM."))
+    assert "€620,000" in d_life and "€300,000" not in d_life and "Life On" not in d_life.split("Dear")[0]
+    d_both = draft_reply(route(LEAD_COUPLE))
+    assert "Life On:" in d_both and "Medical Prime:" in d_both and "€620,000" in d_both and "€300,000" in d_both
+
+
+def test_zero_deductible_is_not_a_reason_to_leave_generali():
+    r = route("I have a Greek AFM and want hospital cover with zero deductible.")
+    assert r.track == GENERALI and [h.rule for h in r.reviews] == ["zero_deductible"]
+    d = draft_reply(route("I have a Greek AFM, free choice of doctors and zero deductible."))
+    assert "€0, €750" in draft_reply(route("Life On please, free choice of doctors, zero deductible. I have an AFM."))
+    assert "I will also check the policy wording on: nil" not in d
+
+
+def test_lead_with_foreign_hospital_abroad_is_told_no_direct_billing_abroad_for_medical_prime():
+    from core.generali_plans import MEDICAL_PRIME, wording_for
+    assert "no direct billing abroad" in wording_for([MEDICAL_PRIME])["overseas"][1]

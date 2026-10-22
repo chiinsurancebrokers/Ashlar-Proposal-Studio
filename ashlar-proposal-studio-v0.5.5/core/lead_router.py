@@ -9,14 +9,16 @@ and decides one of three tracks:
   still presents Life On honestly for the hospital core, then offers an international plan for the rest.
 * ``international_only``: the lead says they have no Greek AFM, so Generali cannot enrol them.
 
-Nothing here is a price. Facts about Life On come from the Family Mix work (hospital-only, €1,500
-participation, optional Doctors & Exams add-on) and from core/waiting_periods.py. Anything not known is
+Nothing here is a price. Per-plan benefit facts (Life On and Medical Prime, kept apart) live in
+core/generali_plans.py; waiting periods in core/waiting_periods.py. Anything not known is
 left as a [CONFIRM] marker for the broker, never filled in.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+
+from core.generali_plans import (LIFE_ON, MEDICAL_PRIME, PLAN_NAMES, PLAN_POINTS, PLAN_WAITS, wording_for)
 
 GENERALI = "generali_life_on"
 MIXED = "generali_plus_international"
@@ -46,7 +48,7 @@ RULES: list[tuple[str, str, str, list[str]]] = [
         r"global\s+(cover|coverage|plan)", r"international\s+(/\s*overseas\s+)?(medical\s+)?(cover|coverage|plan|health)",
         r"stud\w+\s+(in|abroad)", r"expat",
     ]),
-    ("zero_deductible", "Nil or low deductible / no participation", GAP, [
+    ("zero_deductible", "Nil or low deductible / no participation (Life On offers a €0 option)", REVIEW, [
         r"(zero|nil|no|low)\s+(or\s+(zero|nil|no)\s+)?(deductibles?|excess|participation|co[\s-]*pay)",
         r"full\s+reimbursement",
     ]),
@@ -83,26 +85,11 @@ REQUEST_RULES: list[tuple[str, str | None, str | None, list[str]]] = [
 # Always promised for each option, then any extra the applicant asked for.
 DEFAULT_PROVIDE = ["hospital_list", "direct_billing", "out_of_network", "waiting_periods", "exclusions", "annual_limits"]
 # Answered with facts in the reply itself (Generali tracks); everything else is promised in the quotation.
-ANSWERED_NOW = {"hospital_list", "waiting_periods", "deductibles", "annual_limits", "info_needed"}
+ANSWERED_NOW = {"hospital_list", "waiting_periods", "deductibles", "annual_limits", "info_needed", "direct_billing", "preventive"}
 _REQ = {rid: (ack, prov) for rid, ack, prov, _ in REQUEST_RULES}
 
-# What the Generali wordings allow us to say for each request. The reply may promise on Generali's behalf only
-# what these wordings (Medical Prime quote 08547743, Doctors & Exams Premium and On Demand) support.
-#   wording     the wording or quote answers it; we send what it says
-#   confirm     the wordings I hold do not settle it; we confirm with Generali and promise no content
-#   partial     part of it is in the wording; the reply states exactly that part
-#   not_offered the wording gives no such benefit; the reply says so and only the international options provide it
-GENERALI_WORDING: dict[str, tuple[str, str]] = {
-    "hospital_list": ("wording", ""), "waiting_periods": ("wording", ""), "annual_limits": ("wording", ""),
-    "deductibles": ("wording", ""), "exclusions": ("wording", ""), "pre_existing": ("wording", ""),
-    "info_needed": ("wording", ""),
-    "direct_billing": ("confirm", ""), "premium": ("confirm", ""), "underwriting": ("confirm", ""),
-    "renewal_age": ("confirm", ""), "start_date": ("confirm", ""),
-    "out_of_network": ("not_offered", "Reimbursement for doctors outside Generali's partner network is not part of the programme."),
-    "prescriptions": ("not_offered", "Prescription medication is not covered under the doctors and tests cover; chronic-condition medication is available only through a separate add-on."),
-    "preventive": ("partial", "Preventive check-ups are limited to the tests listed in the quotation. [CONFIRM: preventive exams are excluded from the Doctors & Exams Premium add-on]"),
-    "overseas": ("partial", "Hospital stays abroad are covered at 100% (90% in the USA and Canada) on the quotation I have; outpatient care abroad is not part of the programme. [CONFIRM against the wording]"),
-}
+# What the Generali documents allow us to say, per plan, lives in core/generali_plans.py (PLAN_WORDING).
+# The reply may promise on Generali's behalf only what the plans in play support: see wording_for(r.plans).
 _GEN_PHRASE = {"exclusions": "the exclusions", "pre_existing": "how pre-existing conditions are treated",
                "direct_billing": "direct billing", "premium": "the annual premium", "underwriting": "the medical underwriting requirements",
                "renewal_age": "renewal terms and age limits", "start_date": "the earliest possible start date"}
@@ -132,6 +119,7 @@ class Routing:
     hits: list[Hit] = field(default_factory=list)
     asked_for_life_on: bool = False
     requests: list[str] = field(default_factory=list)
+    plans: list[str] = field(default_factory=list)  # Generali plans the lead names; empty = none named
 
     @property
     def gaps(self) -> list[Hit]:
@@ -176,7 +164,8 @@ def route(text: str) -> Routing:
     else:
         track = GENERALI
     requests = [rid for rid, _, _, pats in REQUEST_RULES if _first(pats, sents)]
-    return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)), requests=requests)
+    plans = [p for p, pat in ((LIFE_ON, r"life[\s-]*on"), (MEDICAL_PRIME, r"medical[\s-]*prime")) if re.search(pat, text, re.I)]
+    return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)), requests=requests, plans=plans)
 
 
 # The numbered questions in the broker's own reply to lead 001.
@@ -201,22 +190,6 @@ _IPMI_POINTS = {
 }
 
 
-# Generali facts. Medical Prime figures come from the Table of Benefits of quote 08547743 (21/10/2026), issued
-# for one adult, so participations and limits must be checked against the applicant's own quote.
-MEDICAL_PRIME_POINTS = [
-    "Hospital stays in Greece covered at 100% with no participation, up to €300,000 a year per person, in Generali's partner hospitals: "
-    "Hygeia and Mitera (Hygeia Group) in Athens and Euromedica in Thessaloniki. A first-class room adds €100 a night. "
-    "[CONFIRM: these figures come from a recent quote for one adult and may differ on your family quote; the quote shows no participation 'with use of a social insurance fund', so check how it applies if you do not use one]",
-    "Unlimited scheduled visits to partner doctors, €10 per visit.",
-    "Emergencies: a visit to a partner doctor on duty has no participation; a partner specialist called out in an emergency costs €50.",
-    "Diagnostic tests and medical procedures: up to €1,500 per insurance year, with 15% participation, on referral from a partner doctor.",
-    "Physiotherapy: up to €1,000 per insurance year, with 15% participation.",
-    "Annual preventive check-up (14 tests for adults, 5 for children), €10 each, available from six months after the start.",
-]
-MEDICAL_PRIME_WAITS = ("Waiting periods: doctors and tests are covered from one month after the start. For hospital cover, conditions you "
-                       "declare and already know about are covered after two years (five years if they relate to a malignancy); conditions "
-                       "that were unknown and undeclared after one or two years, depending on the condition; and congenital conditions "
-                       "(other than cardiac) and listed special conditions after ten years.")
 PREMIUM_COVERS = ("unlimited visits to Generali's partner doctors, with a participation per visit; "
                   "diagnostic tests at partner diagnostic centres, with a referral and Generali's prior approval; "
                   "a family doctor chosen from the partner network; and a set number of visits a year to a doctor of your own "
@@ -234,30 +207,36 @@ _WANTS = {
 }
 
 
+_OWN_DOCTOR = {False: "Routine visits to private doctors and specialists of your own choice are not included.",
+               True: "Visits to doctors of your own choice outside the network are limited to a set number a year."}
+
+
 def _join(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def _generali_position(r: Routing, skip: tuple[str, ...] = ()) -> list[str]:
     """Plain statements about requested points Generali does not offer in full."""
-    lines = [GENERALI_WORDING[x][1] for x in r.requests
-             if GENERALI_WORDING.get(x, ("", ""))[0] in ("not_offered", "partial") and x not in skip]
+    w = wording_for(r.plans)
+    lines = [w[x][1] for x in r.requests if w.get(x, ("", ""))[0] in ("not_offered", "partial") and x not in skip]
     return [" ".join(lines), ""] if lines else []
 
 
 def generali_promises(r: Routing) -> list[str]:
     """What the reply promises for the Generali option: only items its wording supports or Generali confirms."""
     wanted = ["exclusions"] + [x for x in r.requests if x in _GEN_PHRASE]
+    w = wording_for(r.plans)
     out: list[str] = []
     for x in wanted:
-        if GENERALI_WORDING[x][0] in ("wording", "confirm") and x not in out:
+        if w[x][0] in ("wording", "confirm") and x not in out:
             out.append(x)
     return out
 
 
 def _generali_sentences(r: Routing) -> list[str]:
     items = generali_promises(r)
-    said = [GENERALI_WORDING[x][0] for x in items]
+    w = wording_for(r.plans)
+    said = [w[x][0] for x in items]
     wording = [_GEN_PHRASE[x] for x, k in zip(items, said) if k == "wording"]
     confirm = [_GEN_PHRASE[x] for x, k in zip(items, said) if k == "confirm"]
     out = []
@@ -287,8 +266,9 @@ def coverage(r: Routing) -> dict[str, str]:
     """For the broker: each request and how the reply treats it.
     answered = facts are in the reply; promised = Generali wording or confirmation follows; ipmi_only = Generali does not offer it."""
     out: dict[str, str] = {}
+    w = wording_for(r.plans)
     for x in r.requests:
-        kind = GENERALI_WORDING.get(x, ("confirm", ""))[0]
+        kind = w.get(x, ("confirm", ""))[0]
         if r.track == INTERNATIONAL:
             out[x] = "answered" if x == "info_needed" else "promised"
         elif x in ANSWERED_NOW:
@@ -313,6 +293,17 @@ def draft_acknowledgement(r: Routing, name: str = "") -> str:
     return "\n".join(out + ["", "Best regards,", ""] + SIGNATURE)
 
 
+def _plan_block(r: Routing) -> list[str]:
+    """Bullets and waiting periods for the plans in play. A plan the lead did not name is not named in the reply."""
+    plans = r.plans or [MEDICAL_PRIME]
+    out: list[str] = []
+    for p in plans:
+        if r.plans and len(plans) > 1:
+            out += [f"{PLAN_NAMES[p]}:", ""]
+        out += [f"* {x}" for x in PLAN_POINTS[p]] + ["", PLAN_WAITS[p], ""]
+    return out
+
+
 def draft_reply(r: Routing, name: str = "") -> str:
     """A first draft for the broker to edit. The mixed track follows the broker's own draft for lead 001;
     facts the broker has not confirmed are [CONFIRM] markers, never filled in."""
@@ -321,7 +312,7 @@ def draft_reply(r: Routing, name: str = "") -> str:
     if r.afm != "has":
         asks.insert(1, AFM_ASK)
     questions = [f"{i}. {a}" for i, a in enumerate(asks, 1)]
-    left = [h for h in r.reviews if h.rule != "diagnostics"]  # diagnostics are answered by the plan facts
+    left = [h for h in r.reviews if h.rule not in ("diagnostics", "zero_deductible")]  # answered by the plan facts
     review = (["I will also check the policy wording on: " + "; ".join(h.label.lower() for h in left) + ".", ""] if left else [])
     sign = ["Best regards,", ""] + SIGNATURE
 
@@ -334,7 +325,7 @@ def draft_reply(r: Routing, name: str = "") -> str:
     elif r.track == GENERALI:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
                *_acknowledge(r), "Generali covers hospitalisation in Greece and, within its partner network, on a recent Generali quotation:", ""]
-        out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, ""] + _generali_position(r) + [" ".join(_generali_sentences(r)), ""] + review
+        out += _plan_block(r) + _generali_position(r) + [" ".join(_generali_sentences(r)), ""] + review
     else:  # MIXED
         wants = _join([_WANTS[h.rule] for h in r.gaps if h.rule in _WANTS])
         out = [who, "",
@@ -342,9 +333,9 @@ def draft_reply(r: Routing, name: str = "") -> str:
                "in Greece, distinguished for its hospital cover and the range of benefits it offers.", "",
                *_acknowledge(r),
                "To be fully transparent about your requirements: Generali's programmes cover hospitalisation in Greece very well, "
-               "but doctors, tests and emergency visits are covered only within their partner network. Routine visits to private doctors and "
-               "specialists of your own choice are not included. In more detail, on a recent Generali quotation:", ""]
-        out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, "",
+               "but doctors, tests and emergency visits are covered mainly within their partner network. " + _OWN_DOCTOR[LIFE_ON in r.plans]
+               + " In more detail, on a recent Generali quotation:", ""]
+        out += _plan_block(r) + [
                f"Since you are looking for {wants}, we would recommend an international private medical insurance (IPMI) plan, "
                "and for this reason your enquiry has been passed to me.", "",
                "At Ashlar we work with Generali in the Greek market, and we also have direct agreements with many IPMI providers, "

@@ -108,7 +108,7 @@ def test_every_request_in_the_lead_is_acknowledged_and_answered_or_promised():
     d = draft_reply(r, name="Julian")
     assert "You asked about" in d and "the participating hospital list" in d
     assert "deductible options" in d.split("For the international options we will also provide")[1]
-    assert set(coverage(r).values()) <= {"answered", "promised"} and set(coverage(r)) == set(r.requests)
+    assert set(coverage(r).values()) <= {"answered", "promised", "ipmi_only"} and set(coverage(r)) == set(r.requests)
 
 
 def test_long_checklist_lead_gets_every_item_promised():

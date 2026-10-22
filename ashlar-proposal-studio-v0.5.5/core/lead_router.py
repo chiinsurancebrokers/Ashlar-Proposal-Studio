@@ -101,11 +101,13 @@ _CARRIERS = ", ".join(INTERNATIONAL_CARRIERS[:-1]) + " and " + INTERNATIONAL_CAR
 
 # Why the lead reached Ashlar. Ashlar is an independent broker: not employed by or on the payroll of Generali, and
 # responsible for its own advice. Never say or imply otherwise. Edit the registration marker before sending.
-BRIDGE = ("Generali Greece forwards English-language enquiries like yours to Ashlar Assurance, an independent insurance broker. "
-          "We are not employed by Generali, and we, not Generali, are responsible for the advice and service we give you. "
-          "[CONFIRM: add Ashlar's broker registration number]")
+BRIDGE = ("As we have been serving expats and affluent Greeks for many years, working with top-tier international health insurance "
+          "providers, we have established a strategic collaboration with Generali, so we can guide you to the best insurance solution "
+          "for your health needs and priorities. Ashlar Assurance is an independent insurance broker. We are not employed by Generali "
+          "and have no employment relationship with it. We are licensed insurance brokers, and we are responsible for the advice and "
+          "service we give you. [CONFIRM: add Ashlar's broker registration number]")
 COMMISSION = ("We are paid only by commission from the insurer whose policy you choose, and we do not charge you any fee.")
-DISCLOSURE = (BRIDGE + " Ashlar also works with other leading insurers, so I can compare other options for you. " + COMMISSION)
+DISCLOSURE = (BRIDGE + " " + COMMISSION)
 
 
 @dataclass
@@ -342,8 +344,8 @@ def draft_reply(r: Routing, name: str = "") -> str:
         out += _plan_block(r) + [
                f"Since you are looking for {wants}, we would recommend an international private medical insurance (IPMI) plan, "
                "alongside, or instead of, a Generali plan.", "",
-               BRIDGE + " We work with Generali in the Greek market and we also have direct agreements with many IPMI providers, "
-               f"including {_CARRIERS}, so we can compare both routes for you. " + COMMISSION.replace("the insurer whose policy you choose", "the insurer you choose"), "",
+               BRIDGE + f" That means we can compare Generali with international providers including {_CARRIERS}, so you can see both routes. "
+               + COMMISSION.replace("the insurer whose policy you choose", "the insurer you choose"), "",
                "IPMI plans can combine:", ""]
         out += [f"* {_IPMI_POINTS[h.rule]}" for h in r.gaps if h.rule in _IPMI_POINTS] + [""]
         out += ["If these are not a high priority, we can instead provide a Generali hospital cover quotation alongside the IPMI one, "

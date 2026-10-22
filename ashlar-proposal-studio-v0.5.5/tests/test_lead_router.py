@@ -192,7 +192,7 @@ def test_every_track_says_why_the_lead_reached_ashlar_without_implying_a_tie_to_
     for text in (LEAD_FAMILY, "I have no AFM. I want hospital cover.", "I live in Athens and have an AFM. I want hospital cover."):
         d = draft_reply(route(text))
         assert "independent insurance broker" in d and "not employed by Generali" in d
-        assert "we, not Generali, are responsible" in d and "[CONFIRM: add Ashlar's broker registration number]" in d
+        assert "no employment relationship" in d and "we are responsible for the advice and service we give you" in d and "[CONFIRM: add Ashlar's broker registration number]" in d
         for banned in ("on behalf of Generali", "our Generali team", "I handle English-language enquiries for Generali", "passed to me"):
             assert banned not in d
 

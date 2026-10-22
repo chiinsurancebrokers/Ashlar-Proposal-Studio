@@ -71,3 +71,16 @@ def test_draft_never_invents_facts_and_asks_for_afm_when_unknown():
 def test_international_draft_does_not_pitch_life_on():
     d = draft_reply(route("I have no AFM. I want hospital cover."))
     assert "Life On is" not in d and "not an option" in d
+
+
+def test_mixed_draft_states_what_the_premium_wording_actually_covers():
+    d = draft_reply(route(LEAD_FAMILY))
+    assert "outside the network" in d and "unlimited visits" in d       # own-choice visits and partner visits
+    assert "preventive check-ups" in d and "only spinal and knee" in d  # exclusions and the one-year waits
+    assert "not reimbursed" not in d                                    # the earlier draft said this wrongly
+
+
+def test_on_demand_waiting_table_has_both_languages():
+    from core import waiting_periods as wp
+    assert [wp.rows(wp.ON_DEMAND, "en")[i][0][:6] for i in range(2)] == ["Dental", "Aesthe"]
+    assert all(wp.rows(wp.ON_DEMAND, "el"))

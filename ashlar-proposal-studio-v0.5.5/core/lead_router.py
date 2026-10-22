@@ -60,9 +60,9 @@ AFM_NONE = [
 ]
 AFM_HAS = [r"\ba\.?f\.?m\.?\b", r"greek\s+tax\s+(id|number)", r"tax\s+resident\s+in\s+greece", r"\bvat\s+number\b"]
 
-DISCLOSURE = ("[CONFIRM your exact status and wording] I handle English-language enquiries for Generali Greece. "
-              "As a broker I can also arrange international plans from other insurers, and I am paid by commission "
-              "from the insurer whose policy you choose.")
+DISCLOSURE = ("I handle English-language enquiries for Generali Greece. Ashlar Assurance also works with the leading "
+              "insurers, so I can compare other options for you. We are paid only by commission from the insurer whose "
+              "policy you choose, and we do not charge you any fee. [CONFIRM your exact regulatory status wording]")
 
 
 @dataclass

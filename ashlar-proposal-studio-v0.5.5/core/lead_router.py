@@ -197,7 +197,7 @@ _IPMI_POINTS = {
     "enriched_outpatient": "Outpatient cover for doctors, specialists, diagnostics and prescriptions, with emergency care including visits where admission is not required",
     "zero_deductible": "Low or zero deductible options",
     "cover_abroad": "Cover and direct billing outside Greece, in Europe or worldwide",
-    "no_waiting_periods": "Waiting periods that vary by plan; we will show them for every option",
+    "no_waiting_periods": "Little or no waiting period on many plans, apart from maternity, dental, mental health and wellbeing cover, which usually have their own; we will show them for every option",
 }
 
 
@@ -220,6 +220,13 @@ _WANTS = {
 
 _OWN_DOCTOR = {False: "Routine visits to private doctors and specialists of your own choice are not included.",
                True: "Visits to doctors of your own choice outside the network are limited to a set number a year."}
+
+
+def _DETAIL_INTRO(r: "Routing") -> str:
+    plans = r.plans or [DEFAULT_PLAN]
+    if plans == [LIFE_ON]:
+        return "In more detail, Generali's flagship plan is Life On, which covers:"
+    return "In more detail, on a recent Generali quotation:"
 
 
 def _join(items: list[str]) -> str:
@@ -345,14 +352,15 @@ def draft_reply(r: Routing, name: str = "") -> str:
                *_acknowledge(r),
                "To be fully transparent about your requirements: Generali's programmes cover hospitalisation in Greece very well, "
                "but doctors, tests and emergency visits are covered mainly within their partner network. " + _OWN_DOCTOR[LIFE_ON in (r.plans or [DEFAULT_PLAN])]
-               + " In more detail, on a recent Generali quotation:", ""]
+               + " " + _DETAIL_INTRO(r), ""]
         out += _plan_block(r) + [
-               f"Since you are looking for {wants}, we would recommend an international private medical insurance (IPMI) plan, "
-               "alongside, or instead of, a Generali plan.", "",
+               f"Since you are looking for {wants}, we would also like to recommend an international private medical insurance (IPMI) plan "
+               "as an alternative.", "",
                BRIDGE + f" That means we can compare Generali with international providers including {_CARRIERS}, so you can see both routes. "
                + COMMISSION.replace("the insurer whose policy you choose", "the insurer you choose"), "",
                "IPMI plans can combine:", ""]
-        out += [f"* {_IPMI_POINTS[h.rule]}" for h in r.gaps if h.rule in _IPMI_POINTS] + [""]
+        out += [f"* {_IPMI_POINTS[h.rule]}" for h in r.gaps if h.rule in _IPMI_POINTS]
+        out += ["* Comprehensive benefits, such as mental health, maternity and complementary therapies", ""]
         out += ["If these are not a high priority, we can instead provide a Generali hospital cover quotation alongside the IPMI one, "
                 "so you can compare both and decide what suits you best."
                 + (" Generali requires a valid Greek AFM for each adult." if r.afm != "has" else ""), "",

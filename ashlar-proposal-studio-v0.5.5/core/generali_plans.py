@@ -60,22 +60,32 @@ def network_text(plan: str) -> str:
 
 
 LIFE_ON_POINTS = [
-    "Hospital cover (Hospital Premium Flexi): annual capital of €620,000, €940,000 or €1,240,000 per person (the quote I have is €620,000), 100% in Greece and abroad "
-    "(95% in the USA and Canada) after your participation, and 100% with no participation in public hospitals. Partner hospitals "
-    "settle directly with Generali, so you pay only your participation. [CONFIRM: figures are from a recent quote for one adult]",
-    "You choose your room: A (private) or B (semi-private). Room A has a higher premium than the same cover with room B. The quote I have is for room A.",
-    "You choose your participation: €0, €750, €1,500, €3,000, €5,000 or €10,000 a year, and a higher participation lowers the premium. "
+    "Hospital cover (Hospital Premium Flexi) with an annual capital of €620,000, €940,000 or €1,240,000 per person (the quote I have is "
+    "€620,000): 100% in Greece and abroad (95% in the USA and Canada) after your participation, and 100% with no participation in public "
+    "hospitals. [CONFIRM: figures are from a recent quote for one adult]",
+    "Voluntary participation (excess) of €0, €750, €1,500, €3,000, €5,000 or €10,000 a year; a higher participation lowers the premium. "
     "With €750 or €1,500, the seven listed serious-illness categories carry no participation.",
-    "Life On is built from modules, so you can add or drop prevention, doctors and exams, hospital, rehabilitation, life cover and accident covers to suit you.",
+    "Partner hospitals are paid directly by Generali, so you pay only your participation. If another insurer, such as EOPYY, pays more "
+    "than your participation, a bonus of up to €5,000 a year applies. [CONFIRM: how the bonus applies if you use EOPYY]",
+    "Your choice of room: A (private) or B (semi-private). Room A has a higher premium than the same cover with room B. The quote I have is for room A.",
     "Wide network of partner hospitals, including " + network_text(LIFE_ON) + ".",
+    "Life On is built from modules, so you can add or drop prevention, doctors and exams, hospital, rehabilitation, life cover and accident covers to suit you.",
     "Doctors & Exams Premium: unlimited visits to partner doctors at €20 per visit, a family doctor at €40 for the first visit and €12 "
     "after that, and four visits a year to a doctor of your own choice outside the network, reimbursed up to €20 a visit. "
     "Diagnostic tests at partner diagnostic centres up to €2,500 a year with no participation, on a referral from a partner doctor.",
     "Prevention Standard: an annual check-up (19 tests for adults, 11 for children), with other preventive exams at preferential prices.",
-    "Also in the hospital cover: costs 30 days before and 60 days after surgery, day surgery with no participation, a private nurse "
-    "for up to 30 days, emergency medical transport up to €5,000, a second medical opinion, a daily allowance when you do not claim, "
-    "and the option of continuing cover for protected members without a new health check.",
+    "Also in the hospital cover: doctor visits and tests up to 30 days before, and tests, medication and physiotherapy up to 60 days after, "
+    "the hospital stay; day surgery with no participation; a private nurse for up to 30 days; emergency medical transport up to €5,000 a year "
+    "in Greece and the EU; a second medical opinion for 13 serious conditions, up to twice per condition; and the option of continuing cover "
+    "for protected members without a new health check.",
+    "Around the hospital stay: preventive mastectomy or ovary and tube removal up to €5,000 (once) and breast reconstruction up to €5,000 (once); "
+    "psychological support at €50 a session for up to 10 sessions; legal expenses up to €3,000 a year; emergencies without admission up to €500 "
+    "per incident, and listed medical procedures up to €1,000 a year, at special partner hospitals with no participation; a newborn allowance of "
+    "€1,200 in the third insurance year and €1,800 in the fourth.",
+    "If you are hospitalised and do not submit expenses: a daily allowance of €100 (€150 in intensive care) for up to 15 days, and a surgery "
+    "allowance from €100 to €2,000 depending on the class of operation.",
 ]
+
 LIFE_ON_WAITS = ("Waiting periods (Hospital Premium Flexi, Article 5): appendectomy the first three months of the first year; "
                  "nasal growths and tonsillectomy the first year; bowel and genital conditions (except malignancy) and pregnancy complications "
                  "the first two years; deviated septum, spinal conditions and removal of moles and papillomas the first three years. "

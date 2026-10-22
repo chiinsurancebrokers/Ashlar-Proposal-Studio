@@ -87,9 +87,9 @@ def test_international_draft_does_not_pitch_life_on():
 def test_mixed_draft_uses_the_quote_figures_and_the_brokers_structure():
     d = draft_reply(route(LEAD_FAMILY), name="Julian")
     assert d.startswith("Dear Julian,") and "Medical Prime" not in d  # he did not ask for it
-    assert "Unlimited scheduled visits to partner doctors, €10 per visit" in d  # the maximum visits in the quote
-    assert "Hygeia" in d and "Euromedica" in d and "€300,000" in d
-    assert "one month after the start" in d and "ten years" in d
+    assert "four visits a year to a doctor of your own choice" in d  # Life On is promoted when no plan is named
+    assert "€620,000" in d and "€0, €750" in d and "Hygeia" in d and "€300,000" not in d
+    assert "first three months of the first year" in d
     assert "not reimbursed" not in d and "[CONFIRM" in d
     assert d.rstrip().endswith("Protection built for the life you live.")
 
@@ -146,7 +146,9 @@ def test_generali_side_never_promises_what_its_wording_does_not_offer():
         for banned in ("out-of-network", "prescription", "overseas", "worldwide"):
             assert not any(banned in ln for ln in gen), (banned, gen)
         assert "For each option we will provide" not in d
-    assert coverage(route(LEAD_FAMILY))["out_of_network"] == "ipmi_only"
+    assert coverage(route(LEAD_FAMILY))["out_of_network"] == "answered"  # Life On reimburses four own-choice visits
+    from core.generali_plans import MEDICAL_PRIME
+    assert coverage(route("Medical Prime please. Reimbursement for any doctor. I have an AFM."))["out_of_network"] == "ipmi_only"
     assert coverage(route(LEAD_COUPLE))["prescriptions"] == "ipmi_only"
 
 

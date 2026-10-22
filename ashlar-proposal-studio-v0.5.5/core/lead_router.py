@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from core.generali_plans import (LIFE_ON, MEDICAL_PRIME, PLAN_NAMES, PLAN_POINTS, PLAN_WAITS, wording_for)
+from core.generali_plans import (DEFAULT_PLAN, LIFE_ON, MEDICAL_PRIME, PLAN_NAMES, PLAN_POINTS, PLAN_WAITS, wording_for)
 
 GENERALI = "generali_life_on"
 MIXED = "generali_plus_international"
@@ -295,7 +295,7 @@ def draft_acknowledgement(r: Routing, name: str = "") -> str:
 
 def _plan_block(r: Routing) -> list[str]:
     """Bullets and waiting periods for the plans in play. A plan the lead did not name is not named in the reply."""
-    plans = r.plans or [MEDICAL_PRIME]
+    plans = r.plans or [DEFAULT_PLAN]
     out: list[str] = []
     for p in plans:
         if r.plans and len(plans) > 1:
@@ -333,7 +333,7 @@ def draft_reply(r: Routing, name: str = "") -> str:
                "in Greece, distinguished for its hospital cover and the range of benefits it offers.", "",
                *_acknowledge(r),
                "To be fully transparent about your requirements: Generali's programmes cover hospitalisation in Greece very well, "
-               "but doctors, tests and emergency visits are covered mainly within their partner network. " + _OWN_DOCTOR[LIFE_ON in r.plans]
+               "but doctors, tests and emergency visits are covered mainly within their partner network. " + _OWN_DOCTOR[LIFE_ON in (r.plans or [DEFAULT_PLAN])]
                + " In more detail, on a recent Generali quotation:", ""]
         out += _plan_block(r) + [
                f"Since you are looking for {wants}, we would recommend an international private medical insurance (IPMI) plan, "

@@ -16,6 +16,7 @@ from __future__ import annotations
 LIFE_ON = "life_on"
 MEDICAL_PRIME = "medical_prime"
 PLAN_NAMES = {LIFE_ON: "Life On", MEDICAL_PRIME: "Medical Prime"}
+DEFAULT_PLAN = LIFE_ON  # the plan Generali wants promoted when a lead names none
 
 # Life On: the participation is chosen by the applicant and lowers the premium as it rises.
 LIFE_ON_PARTICIPATION = (0, 750, 1500, 3000, 5000, 10000)
@@ -57,8 +58,11 @@ LIFE_ON_POINTS = [
     "for up to 30 days, emergency medical transport up to €5,000, a second medical opinion, a daily allowance when you do not claim, "
     "and the option of continuing cover for protected members without a new health check.",
 ]
-LIFE_ON_WAITS = ("Waiting periods follow the policy wording for each module: hospital cover (Article 5) and doctors and exams (Article 3), "
-                 "and the extras such as dental and aesthetic medicine have their own periods. I will send them in full.")
+LIFE_ON_WAITS = ("Waiting periods (Hospital Premium Flexi, Article 5): appendectomy the first three months of the first year; "
+                 "nasal growths and tonsillectomy the first year; bowel and genital conditions (except malignancy) and pregnancy complications "
+                 "the first two years; deviated septum, spinal conditions and removal of moles and papillomas the first three years. "
+                 "Doctors & Exams Premium: spinal and knee conditions after the first year. Optional dental cover applies after two years "
+                 "and aesthetic medicine after three. [CONFIRM against the full wording before sending]")
 
 MEDICAL_PRIME_POINTS = [
     "Hospital stays in Greece covered at 100% with no participation, up to €300,000 a year per person, in Generali's partner hospitals: "
@@ -114,7 +118,7 @@ _RANK = {"not_offered": 0, "confirm": 1, "partial": 2, "wording": 3}
 
 def wording_for(plans: list[str]) -> dict[str, tuple[str, str]]:
     """The wording table for the plans in play. With two plans, a point is promised only if both support it."""
-    plans = plans or [MEDICAL_PRIME]
+    plans = plans or [DEFAULT_PLAN]
     if len(plans) == 1:
         return PLAN_WORDING[plans[0]]
     out: dict[str, tuple[str, str]] = {}

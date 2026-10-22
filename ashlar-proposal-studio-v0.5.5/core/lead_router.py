@@ -9,7 +9,7 @@ and decides one of three tracks:
   still presents Life On honestly for the hospital core, then offers an international plan for the rest.
 * ``international_only``: the lead says they have no Greek AFM, so Generali cannot enrol them.
 
-Nothing here is a price. Facts about Life On come from the Family Mix work (hospital-only, EUR 1,500
+Nothing here is a price. Facts about Life On come from the Family Mix work (hospital-only, €1,500
 participation, optional Doctors & Exams add-on) and from core/waiting_periods.py. Anything not known is
 left as a [CONFIRM] marker for the broker, never filled in.
 """
@@ -152,29 +152,54 @@ _IPMI_POINTS = {
 }
 
 
-# Facts from the Generali wordings "Doctors & Exams Premium" and "Doctors & Exams On Demand". Amounts, the
-# number of own-choice visits and participations sit in the Table of Benefits, which is not in the repo.
+# Generali facts. Medical Prime figures come from the Table of Benefits of quote 08547743 (21/10/2026), issued
+# for one adult, so participations and limits must be checked against the applicant's own quote.
+MEDICAL_PRIME_POINTS = [
+    "Hospital stays in Greece covered at 100% with no participation, up to €300,000 a year per person, in Generali's partner hospitals: "
+    "Hygeia and Mitera (Hygeia Group) in Athens and Euromedica in Thessaloniki. A first-class room adds €100 a night. "
+    "[CONFIRM: the quote shows no participation 'with use of a social insurance fund'; check how it applies if you do not use one]",
+    "Unlimited scheduled visits to partner doctors, €10 per visit.",
+    "Emergencies: a visit to a partner doctor on duty has no participation; a partner specialist called out in an emergency costs €50.",
+    "Diagnostic tests and medical procedures: up to €1,500 per insurance year, with 15% participation, on referral from a partner doctor.",
+    "Physiotherapy: up to €1,000 per insurance year, with 15% participation.",
+    "Annual preventive check-up (14 tests for adults, 5 for children), €10 each, available from six months after the start.",
+]
+MEDICAL_PRIME_WAITS = ("Waiting periods: doctors and tests are covered from one month after the start. For hospital cover, conditions you "
+                       "declare and already know about are covered after two years (five years if they relate to a malignancy); conditions "
+                       "that were unknown and undeclared after one or two years, depending on the condition; and congenital conditions "
+                       "(other than cardiac) and listed special conditions after ten years.")
 PREMIUM_COVERS = ("unlimited visits to Generali's partner doctors, with a participation per visit; "
                   "diagnostic tests at partner diagnostic centres, with a referral and Generali's prior approval; "
                   "a family doctor chosen from the partner network; and a set number of visits a year to a doctor of your own "
                   "choice outside the network, reimbursed as the Table of Benefits shows")
 PREMIUM_NOT = ("preventive check-ups, prescription medication, pregnancy, tests done only in a hospital, "
                "and exams or specialties outside the partner network")
-ON_DEMAND_COVERS = ("dental fillings, extractions and root canals (after two insurance years), prescription lenses, "
-                    "chronic-condition medication, and aesthetic medicine (after three insurance years)")
+SIGNATURE = ["Chris Iatropoulos", "Founder | Ashlar Assurance", "M +30 697 590 0189",
+             "E c.iatropoulos@ashlarassurance.com", "W ashlarassurance.com", "Protection built for the life you live."]
+_WANTS = {
+    "free_doctor_choice": "free choice of private doctors and hospitals",
+    "enriched_outpatient": "outpatient cover for doctors, specialists and tests",
+    "zero_deductible": "low or zero deductibles",
+    "cover_abroad": "cover and direct billing abroad",
+    "no_waiting_periods": "no waiting periods",
+}
+
+
+def _join(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def draft_reply(r: Routing, name: str = "") -> str:
-    """A first draft for the broker to edit. Generali facts come from the wordings above and
-    core/waiting_periods.py; anything not in them is a [CONFIRM] marker, never filled in."""
+    """A first draft for the broker to edit. The mixed track follows the broker's own draft for lead 001;
+    facts the broker has not confirmed are [CONFIRM] markers, never filled in."""
     who = f"Dear {name}," if name else "Hello,"
     asks = list(ASKS)
     if r.afm != "has":
         asks.insert(1, AFM_ASK)
     questions = [f"{i}. {a}" for i, a in enumerate(asks, 1)]
-    # Diagnostics are answered by the Premium wording above, so only the other review items are listed.
-    left = [h for h in r.reviews if h.rule != "diagnostics"]
+    left = [h for h in r.reviews if h.rule != "diagnostics"]  # diagnostics are answered by the plan facts
     review = (["I will also check the policy wording on: " + "; ".join(h.label.lower() for h in left) + ".", ""] if left else [])
+    sign = ["Best regards,", ""] + SIGNATURE
 
     if r.track == INTERNATIONAL:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
@@ -183,30 +208,29 @@ def draft_reply(r: Routing, name: str = "") -> str:
                f"What I can do is compare international health plans for you from providers such as {_CARRIERS}.", ""]
     elif r.track == GENERALI:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
-               "Generali Life On is a hospital-focused plan with a participation (a cost share, not an excess) of [CONFIRM amount for this quote]. "
-               f"The Doctors & Exams Premium add-on brings {PREMIUM_COVERS}. It does not cover {PREMIUM_NOT}. "
-               "[CONFIRM plan names and the direct-billing hospital list before sending]", ""] + review
+               "Generali Medical Prime covers hospitalisation in Greece and, within Generali's partner network:", ""]
+        out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, ""] + review
     else:  # MIXED
+        wants = _join([_WANTS[h.rule] for h in r.gaps if h.rule in _WANTS])
         out = [who, "",
-               "Thank you for your enquiry and for considering Generali. " + DISCLOSURE, "",
-               "I can show you two routes side by side and let you choose.", "",
-               "**Route 1: Generali (local Greek plan)**",
-               "* Strong private hospital cover in Greece, with direct billing at participating hospitals [CONFIRM hospital list].",
-               f"* The Doctors & Exams Premium add-on brings {PREMIUM_COVERS} [CONFIRM number of visits and amounts].",
-               f"* It does not cover {PREMIUM_NOT}.",
-               "* Waiting periods apply only to specific listed conditions, and I will send you the full list. Under the add-on, only spinal and knee conditions wait one year.",
-               "* A participation (cost share) applies per visit and on hospital claims [CONFIRM amounts].",
-               "* Your spouse and children can be covered as members of the main insured, and each adult needs a valid Greek AFM.",
-               "",
-               "*Best if* you are settled in Greece, are comfortable using a partner network for everyday care, and want strong hospital cover at a predictable cost.", "",
-               "**Route 2: International private medical insurance (IPMI)**"]
-        out += [f"* {_IPMI_POINTS[h.rule]}" for h in r.gaps if h.rule in _IPMI_POINTS]
-        out += ["", "*Best if* unrestricted choice of doctors and everyday outpatient cover matter most.", "",
-                "From your message, unrestricted choice of doctors and low or zero deductibles are your priorities, and Route 2 matches those more closely. "
-                "Generali is the closer match if a partner network is acceptable for everyday care, and its quotation shows what the hospital core costs locally. "
-                f"We work with {_CARRIERS}.", "",
-                "For each option I will show the participating hospital list, direct-billing arrangements, reimbursement for out-of-network doctors, "
-                "waiting periods, exclusions and annual limits.", ""] + review
+               "Thank you for your enquiry and for considering Generali as your health insurance provider. Generali is a well-known insurer "
+               "in Greece, distinguished for its hospital cover and the range of benefits it offers.", "",
+               "To be fully transparent about your requirements: Generali's Medical Prime programme covers hospitalisation in Greece very well, "
+               "but doctors, tests and emergency visits are covered only within its partner network. Routine visits to private doctors and "
+               "specialists of your own choice are not included. In more detail:", ""]
+        out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, "",
+               f"Since you are looking for {wants}, we would recommend an international private medical insurance (IPMI) plan, "
+               "and for this reason your enquiry has been passed to me.", "",
+               "At Ashlar we work with Generali in the Greek market, and we also have direct agreements with many IPMI providers, "
+               f"including {_CARRIERS}, so we can compare both routes for you. We are paid only by commission from the insurer you choose, "
+               "and we do not charge you any fee.", "",
+               "IPMI plans can combine:", ""]
+        out += [f"* {_IPMI_POINTS[h.rule]}" for h in r.gaps if h.rule in _IPMI_POINTS] + [""]
+        out += ["If these are not a high priority, we can instead provide a Generali hospital cover quotation alongside the IPMI one, "
+                "so you can compare both and decide what suits you best."
+                + (" Generali requires a valid Greek AFM for each adult." if r.afm != "has" else ""), "",
+                "For each option we will provide the participating hospital list, direct-billing arrangements, reimbursement for "
+                "out-of-network doctors, waiting periods, exclusions and annual limits.", ""] + review
 
-    out += ["To prepare your comparison, please send me:"] + questions + ["", "Kind regards,"]
+    out += ["To prepare your quotation, please send us:"] + questions + [""] + sign
     return "\n".join(out)

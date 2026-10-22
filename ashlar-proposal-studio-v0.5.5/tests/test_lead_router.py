@@ -63,9 +63,8 @@ def test_waiver_and_zero_deductible_requests():
 def test_draft_never_invents_facts_and_asks_for_afm_when_unknown():
     d = draft_reply(route(LEAD_FAMILY))
     assert "Greek AFM" in d and "commission" in d and "no fee" not in d
-    assert "EUR 1,500" not in d  # the mixed reply does not quote Life On figures it was not asked for
     g = draft_reply(route("I live in Athens and have an AFM. I want hospital cover."))
-    assert "[CONFIRM" in g and "EUR 1,500" not in g  # that figure came from one quote, not from Life On
+    assert "[CONFIRM" in g  # the participation rule in the quote must be checked against the applicant's own quote
 
 
 def test_international_draft_does_not_pitch_life_on():
@@ -73,11 +72,14 @@ def test_international_draft_does_not_pitch_life_on():
     assert "Life On is" not in d and "not an option" in d
 
 
-def test_mixed_draft_states_what_the_premium_wording_actually_covers():
-    d = draft_reply(route(LEAD_FAMILY))
-    assert "outside the network" in d and "unlimited visits" in d       # own-choice visits and partner visits
-    assert "preventive check-ups" in d and "only spinal and knee" in d  # exclusions and the one-year waits
-    assert "not reimbursed" not in d                                    # the earlier draft said this wrongly
+def test_mixed_draft_uses_the_quote_figures_and_the_brokers_structure():
+    d = draft_reply(route(LEAD_FAMILY), name="Julian")
+    assert d.startswith("Dear Julian,") and "Medical Prime" in d
+    assert "Unlimited scheduled visits to partner doctors, €10 per visit" in d  # the maximum visits in the quote
+    assert "Hygeia" in d and "Euromedica" in d and "€300,000" in d
+    assert "one month after the start" in d and "ten years" in d
+    assert "not reimbursed" not in d and "[CONFIRM" in d
+    assert d.rstrip().endswith("Protection built for the life you live.")
 
 
 def test_on_demand_waiting_table_has_both_languages():

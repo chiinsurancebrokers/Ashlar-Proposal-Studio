@@ -101,11 +101,16 @@ _CARRIERS = ", ".join(INTERNATIONAL_CARRIERS[:-1]) + " and " + INTERNATIONAL_CAR
 
 # Why the lead reached Ashlar. Ashlar is an independent broker: not employed by or on the payroll of Generali, and
 # responsible for its own advice. Never say or imply otherwise. Edit the registration marker before sending.
+# Registration as shown on the Athens Chamber of Commerce and Industry certificate of 06/03/2025 (Special Register 9999,
+# "Insurance agents", activity: insurance intermediary) and the registry certificate of 28/08/2026. The registration is in the
+# name of Christos Iatropoulos; the trading name Ashlar Assurance is not on either certificate.
+REGISTRATION = ("registered with the Athens Chamber of Commerce and Industry in the Special Register of Insurance Intermediaries "
+                "(registry no. 191526, GEMI 061564903000, in the name of Christos Iatropoulos)")
 BRIDGE = ("As we have been serving expats and affluent Greeks for many years, working with top-tier international health insurance "
           "providers, we have established a strategic collaboration with Generali, so we can guide you to the best insurance solution "
-          "for your health needs and priorities. Ashlar Assurance is an independent insurance broker. We are not employed by Generali "
-          "and have no employment relationship with it. We are licensed insurance brokers, and we are responsible for the advice and "
-          "service we give you. [CONFIRM: add Ashlar's broker registration number]")
+          "for your health needs and priorities. Ashlar Assurance is an independent insurance intermediary. We are not employed by "
+          "Generali and have no employment relationship with it. We are " + REGISTRATION + ", and we are responsible for the advice "
+          "and service we give you.")
 COMMISSION = ("We are paid only by commission from the insurer whose policy you choose, and we do not charge you any fee.")
 DISCLOSURE = (BRIDGE + " " + COMMISSION)
 

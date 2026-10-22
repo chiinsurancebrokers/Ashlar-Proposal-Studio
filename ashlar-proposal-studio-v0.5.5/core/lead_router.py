@@ -130,7 +130,7 @@ def route(text: str) -> Routing:
     return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)))
 
 
-# The numbered questions in the reply the broker actually sent for lead 001 (approved example).
+# The numbered questions in the broker's own reply to lead 001.
 ASKS = [
     "Dates of birth and nationalities of everyone to be insured",
     "Any existing conditions or ongoing treatment",
@@ -168,7 +168,7 @@ def draft_reply(r: Routing, name: str = "") -> str:
                f"What I can do is compare international health plans for you from providers such as {_CARRIERS}.", ""]
     elif r.track == GENERALI:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
-               "Generali Life On is a hospital-focused plan with a EUR 1,500 participation (a cost share, not an excess). "
+               "Generali Life On is a hospital-focused plan with a participation (a cost share, not an excess) of [CONFIRM amount for this quote]. "
                "It suits anyone who wants strong hospital cover at a sensible price. "
                "An optional Doctors & Exams add-on extends it to doctor visits and tests. "
                "[CONFIRM plan names, direct-billing hospital list and out-of-network reimbursement before sending]", ""]

@@ -25,8 +25,8 @@ def test_router_reproduces_saved_example(path):
 
 def test_generated_questions_include_every_question_in_the_approved_reply():
     ex = json.loads(next(p for p in FILES if "lead_001" in p.name).read_text(encoding="utf-8"))
-    assert ex["status"] == "approved"
-    sent = [ln.split(". ", 1)[1] for ln in ex["approved_reply"].splitlines() if ln[:2].rstrip(".").isdigit() and ". " in ln]
+    assert ex["status"] in ("broker_draft", "approved")
+    sent = [ln.split(". ", 1)[1] for ln in ex.get("approved_reply") or ex["broker_draft_reply"].splitlines() if ln[:2].rstrip(".").isdigit() and ". " in ln]
     assert len(sent) == 7
     draft = draft_reply(route(ex["lead_text"])).lower()
     for q in sent:

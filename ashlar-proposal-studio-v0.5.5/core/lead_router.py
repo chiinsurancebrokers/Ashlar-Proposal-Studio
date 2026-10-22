@@ -60,6 +60,32 @@ AFM_NONE = [
 ]
 AFM_HAS = [r"\ba\.?f\.?m\.?\b", r"greek\s+tax\s+(id|number)", r"tax\s+resident\s+in\s+greece", r"\bvat\s+number\b"]
 
+# What the applicant asks us to explain or provide: (id, how the reply names it, how "we will provide" names it, patterns).
+# The reply acknowledges every request it finds and promises, or answers, each one.
+REQUEST_RULES: list[tuple[str, str | None, str | None, list[str]]] = [
+    ("hospital_list", "the participating hospital list", "the participating hospital list", [r"hospital\s+list", r"participating\s+hospitals?", r"network\s+hospitals?"]),
+    ("direct_billing", "direct billing", "direct-billing arrangements", [r"direct\s+(billing|payment|settlement)"]),
+    ("out_of_network", "reimbursement outside the network", "reimbursement for out-of-network doctors", [r"reimburse\w*", r"out[\s-]*of[\s-]*network", r"outside\s+(of\s+)?(your|the)\s+network"]),
+    ("waiting_periods", "waiting periods", "waiting periods", [r"waiting\s+periods?"]),
+    ("exclusions", "exclusions", "exclusions", [r"exclusions?"]),
+    ("annual_limits", "annual limits", "annual limits", [r"(annual|coverage)\s+(coverage\s+)?limits?"]),
+    ("deductibles", "deductibles", "deductible options", [r"deductibles?", r"\bexcess\b", r"co[\s-]*pay"]),
+    ("premium", "the annual premium", "the annual premium", [r"annual\s+premium", r"\bpremiums?\b", r"how\s+much", r"\bprice\b"]),
+    ("pre_existing", "pre-existing conditions", "how pre-existing conditions are treated", [r"pre[\s-]*existing"]),
+    ("underwriting", "underwriting requirements", "the medical underwriting requirements", [r"underwriting"]),
+    ("renewal_age", "renewal terms and age limits", "renewal terms and age limits", [r"renewal", r"\bage\s+limits?"]),
+    ("start_date", "the earliest start date", "the earliest possible start date", [r"start\s+date", r"earliest\s+possible"]),
+    ("prescriptions", "prescription cover", "prescription cover", [r"prescription"]),
+    ("preventive", "check-ups and preventive care", "check-up and preventive cover", [r"check[\s-]*ups?", r"preventive"]),
+    ("overseas", "overseas cover", "overseas cover", [r"overseas", r"worldwide", r"\babroad\b"]),
+    ("info_needed", None, None, [r"what\s+(information|documents)", r"(information|documents)\s+(you\s+)?(need|require)"]),
+]
+# Always promised for each option, then any extra the applicant asked for.
+DEFAULT_PROVIDE = ["hospital_list", "direct_billing", "out_of_network", "waiting_periods", "exclusions", "annual_limits"]
+# Answered with facts in the reply itself (Generali tracks); everything else is promised in the quotation.
+ANSWERED_NOW = {"hospital_list", "waiting_periods", "deductibles", "annual_limits", "info_needed"}
+_REQ = {rid: (ack, prov) for rid, ack, prov, _ in REQUEST_RULES}
+
 # International carriers Ashlar can compare. Edit here to change who the drafts name.
 INTERNATIONAL_CARRIERS = ("VUMI", "Bupa", "Cigna", "Allianz Care", "IMG", "APRIL International",
                           "OneHealth", "Now Health", "Morgan Price")
@@ -84,6 +110,7 @@ class Routing:
     afm: str                      # "has", "none" or "unknown"
     hits: list[Hit] = field(default_factory=list)
     asked_for_life_on: bool = False
+    requests: list[str] = field(default_factory=list)
 
     @property
     def gaps(self) -> list[Hit]:
@@ -127,7 +154,8 @@ def route(text: str) -> Routing:
         track = MIXED
     else:
         track = GENERALI
-    return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)))
+    requests = [rid for rid, _, _, pats in REQUEST_RULES if _first(pats, sents)]
+    return Routing(track, afm, hits, asked_for_life_on=bool(re.search(r"life[\s-]*on", text, re.I)), requests=requests)
 
 
 # The numbered questions in the broker's own reply to lead 001.
@@ -189,6 +217,40 @@ def _join(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
+def _acknowledge(r: Routing) -> list[str]:
+    """One paragraph saying we read what they asked, or an empty list when nothing specific was asked."""
+    labels = [_REQ[x][0] for x in r.requests if _REQ[x][0]]
+    if not labels:
+        return []
+    if len(labels) > 7:
+        return ["You sent a detailed list of questions, and I cover each of them in this reply or in the quotation.", ""]
+    return [f"You asked about {_join(labels)}, and I cover each of these in this reply or in the quotation.", ""]
+
+
+def _provide(r: Routing) -> str:
+    keys = DEFAULT_PROVIDE + [x for x in r.requests if x not in DEFAULT_PROVIDE and _REQ[x][1]]
+    return _join([_REQ[k][1] for k in keys])
+
+
+def coverage(r: Routing) -> dict[str, str]:
+    """For the broker: each request found in the lead and whether the reply answers it now or promises it."""
+    now = ANSWERED_NOW if r.track != INTERNATIONAL else {"info_needed"}
+    return {x: ("answered" if x in now else "promised") for x in r.requests}
+
+
+def draft_acknowledgement(r: Routing, name: str = "") -> str:
+    """A short receipt to send straight away, before the full reply is ready."""
+    who = f"Dear {name}," if name else "Hello,"
+    labels = [_REQ[x][0] for x in r.requests if _REQ[x][0]]
+    out = [who, "", "Thank you for your enquiry. I have received it and am preparing a reply."]
+    if labels and len(labels) <= 7:
+        out.append(f"You asked about {_join(labels)}, and I will answer each of these.")
+    out += ["", "I will come back to you [CONFIRM when]."]
+    if r.afm != "has" and r.track != INTERNATIONAL:
+        out += ["", "One quick question in the meantime: does each adult hold a valid Greek AFM? Generali can only insure people who do."]
+    return "\n".join(out + ["", "Best regards,", ""] + SIGNATURE)
+
+
 def draft_reply(r: Routing, name: str = "") -> str:
     """A first draft for the broker to edit. The mixed track follows the broker's own draft for lead 001;
     facts the broker has not confirmed are [CONFIRM] markers, never filled in."""
@@ -205,16 +267,18 @@ def draft_reply(r: Routing, name: str = "") -> str:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
                "Generali's plans are local Greek policies and can only be issued to someone with a valid Greek tax number (AFM). "
                "Since you do not have one, Generali is not an option for you at this stage. If that changes, I would be glad to revisit it.", "",
+               *_acknowledge(r),
                f"What I can do is compare international health plans for you from providers such as {_CARRIERS}.", ""]
     elif r.track == GENERALI:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
-               "Generali covers hospitalisation in Greece and, within its partner network, on a recent Generali quotation:", ""]
+               *_acknowledge(r), "Generali covers hospitalisation in Greece and, within its partner network, on a recent Generali quotation:", ""]
         out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, ""] + review
     else:  # MIXED
         wants = _join([_WANTS[h.rule] for h in r.gaps if h.rule in _WANTS])
         out = [who, "",
                "Thank you for your enquiry and for considering Generali as your health insurance provider. Generali is a well-known insurer "
                "in Greece, distinguished for its hospital cover and the range of benefits it offers.", "",
+               *_acknowledge(r),
                "To be fully transparent about your requirements: Generali's programmes cover hospitalisation in Greece very well, "
                "but doctors, tests and emergency visits are covered only within their partner network. Routine visits to private doctors and "
                "specialists of your own choice are not included. In more detail, on a recent Generali quotation:", ""]
@@ -229,8 +293,7 @@ def draft_reply(r: Routing, name: str = "") -> str:
         out += ["If these are not a high priority, we can instead provide a Generali hospital cover quotation alongside the IPMI one, "
                 "so you can compare both and decide what suits you best."
                 + (" Generali requires a valid Greek AFM for each adult." if r.afm != "has" else ""), "",
-                "For each option we will provide the participating hospital list, direct-billing arrangements, reimbursement for "
-                "out-of-network doctors, waiting periods, exclusions and annual limits.", ""] + review
+                f"For each option we will provide {_provide(r)}.", ""] + review
 
     out += ["To prepare your quotation, please send us:"] + questions + [""] + sign
     return "\n".join(out)

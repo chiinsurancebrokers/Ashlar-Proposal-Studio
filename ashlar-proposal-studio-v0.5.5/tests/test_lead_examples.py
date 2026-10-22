@@ -20,6 +20,7 @@ def test_router_reproduces_saved_example(path):
     assert r.afm == ex["expected"]["afm"]
     assert sorted(h.rule for h in r.gaps) == ex["expected"]["gaps"]
     assert sorted(h.rule for h in r.reviews) == ex["expected"]["reviews"]
+    assert r.requests == ex["expected"]["requests"]
     assert draft_reply(r) == ex["reply_draft"]
 
 

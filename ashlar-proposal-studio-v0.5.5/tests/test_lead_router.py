@@ -195,3 +195,10 @@ def test_every_track_says_why_the_lead_reached_ashlar_without_implying_a_tie_to_
         assert "we, not Generali, are responsible" in d and "[CONFIRM: add Ashlar's broker registration number]" in d
         for banned in ("on behalf of Generali", "our Generali team", "I handle English-language enquiries for Generali", "passed to me"):
             assert banned not in d
+
+
+def test_life_on_screen_options_are_recorded():
+    from core.generali_plans import LIFE_ON_HOSPITAL_CAPITAL, LIFE_ON_HOSPITAL_ROOMS, LIFE_ON_LIFE_CAPITAL
+    assert LIFE_ON_HOSPITAL_CAPITAL == (620000, 940000, 1240000) and LIFE_ON_HOSPITAL_ROOMS == ("A", "B")
+    assert LIFE_ON_LIFE_CAPITAL == (500, 10000, 20000, 30000, 50000)
+    assert "€940,000" in draft_reply(route("Life On please, free choice of doctors. I have an AFM."))

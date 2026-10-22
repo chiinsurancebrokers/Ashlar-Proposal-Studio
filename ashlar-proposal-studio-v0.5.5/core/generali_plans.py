@@ -21,6 +21,23 @@ DEFAULT_PLAN = LIFE_ON  # the plan Generali wants promoted when a lead names non
 # Life On: the participation is chosen by the applicant and lowers the premium as it rises.
 LIFE_ON_PARTICIPATION = (0, 750, 1500, 3000, 5000, 10000)
 
+# What the Generali quoting screen offers for Life On (broker's screenshots, 22/10/2026). Only the terms of the tiers we hold
+# documents for (Prevention Standard, Doctors & Exams Premium, Hospital Premium Flexi, Rehabilitation Standard) may be described
+# in a reply; the other tiers are listed so the broker can see what exists, and are never promised.
+LIFE_ON_HOSPITAL_CAPITAL = (620000, 940000, 1240000)   # annual limit options for Hospital Premium Flexi
+LIFE_ON_HOSPITAL_ROOMS = ("A", "B")
+LIFE_ON_TIERS = {
+    "Prevention": ["Basic", "Standard", "Premium", "On Demand"],
+    "Doctors & Exams": ["Basic", "Standard", "Premium", "On Demand"],
+    "Hospital": ["Premium Flexi", "Premium Flexi Plus", "Premium", "Basic", "Standard", "Fee PLUS add-on"],
+    "Rehabilitation": ["Basic", "Standard", "Premium"],
+    "Basic life cover": ["Life", "Life Plus"],
+}
+LIFE_ON_LIFE_CAPITAL = (500, 10000, 20000, 30000, 50000)  # basic life cover capital options on the quoting screen
+LIFE_ON_SUPPLEMENTARY = ["Income loss from temporary disability (accident, or accident or illness)", "Post-accident care",
+                         "Hospital daily allowance", "Accidental death", "Permanent total disability (accident or illness)",
+                         "Permanent total or partial disability (accident)", "Protection of future insurability", "Surgical allowance"]
+
 # Partner hospitals (broker's paste from generali.gr). Medical Prime has its own, narrower partners.
 LIFE_ON_NETWORK = {
     "Athens": ["Athens Eye Hospital", "Henry Dunant", "Euroclinic Athens", "Euroclinic Children", "ENT Clinic Karras",
@@ -43,12 +60,13 @@ def network_text(plan: str) -> str:
 
 
 LIFE_ON_POINTS = [
-    "Hospital cover (Hospital Premium Flexi): annual capital €620,000 per person, 100% in Greece and abroad "
+    "Hospital cover (Hospital Premium Flexi): annual capital of €620,000, €940,000 or €1,240,000 per person (the quote I have is €620,000), 100% in Greece and abroad "
     "(95% in the USA and Canada) after your participation, and 100% with no participation in public hospitals. Partner hospitals "
     "settle directly with Generali, so you pay only your participation. [CONFIRM: figures are from a recent quote for one adult]",
     "You choose your room: A (private) or B (semi-private). Room A has a higher premium than the same cover with room B. The quote I have is for room A.",
     "You choose your participation: €0, €750, €1,500, €3,000, €5,000 or €10,000 a year, and a higher participation lowers the premium. "
     "With €750 or €1,500, the seven listed serious-illness categories carry no participation.",
+    "Life On is built from modules, so you can add or drop prevention, doctors and exams, hospital, rehabilitation, life cover and accident covers to suit you.",
     "Wide network of partner hospitals, including " + network_text(LIFE_ON) + ".",
     "Doctors & Exams Premium: unlimited visits to partner doctors at €20 per visit, a family doctor at €40 for the first visit and €12 "
     "after that, and four visits a year to a doctor of your own choice outside the network, reimbursed up to €20 a visit. "

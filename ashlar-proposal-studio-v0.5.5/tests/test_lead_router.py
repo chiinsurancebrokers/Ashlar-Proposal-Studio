@@ -170,7 +170,7 @@ def test_plans_are_kept_apart_and_only_named_plans_appear():
     assert both[0] == "partial" and "Life On:" in both[1] and "Medical Prime:" in both[1]
     assert wording_for([LIFE_ON])["direct_billing"][0] == "wording"
     d_life = draft_reply(route("I want Life On hospital cover and free choice of doctors. I have an AFM."))
-    assert "€620,000" in d_life and "€300,000" not in d_life and "Life On" not in d_life.split("Dear")[0]
+    assert "€620,000" in d_life and "€300,000" not in d_life and "Medical Prime" not in d_life
     d_both = draft_reply(route(LEAD_COUPLE))
     assert "Life On:" in d_both and "Medical Prime:" in d_both and "€620,000" in d_both and "€300,000" in d_both
 

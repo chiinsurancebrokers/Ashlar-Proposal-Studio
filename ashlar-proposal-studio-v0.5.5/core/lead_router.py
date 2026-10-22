@@ -86,6 +86,27 @@ DEFAULT_PROVIDE = ["hospital_list", "direct_billing", "out_of_network", "waiting
 ANSWERED_NOW = {"hospital_list", "waiting_periods", "deductibles", "annual_limits", "info_needed"}
 _REQ = {rid: (ack, prov) for rid, ack, prov, _ in REQUEST_RULES}
 
+# What the Generali wordings allow us to say for each request. The reply may promise on Generali's behalf only
+# what these wordings (Medical Prime quote 08547743, Doctors & Exams Premium and On Demand) support.
+#   wording     the wording or quote answers it; we send what it says
+#   confirm     the wordings I hold do not settle it; we confirm with Generali and promise no content
+#   partial     part of it is in the wording; the reply states exactly that part
+#   not_offered the wording gives no such benefit; the reply says so and only the international options provide it
+GENERALI_WORDING: dict[str, tuple[str, str]] = {
+    "hospital_list": ("wording", ""), "waiting_periods": ("wording", ""), "annual_limits": ("wording", ""),
+    "deductibles": ("wording", ""), "exclusions": ("wording", ""), "pre_existing": ("wording", ""),
+    "info_needed": ("wording", ""),
+    "direct_billing": ("confirm", ""), "premium": ("confirm", ""), "underwriting": ("confirm", ""),
+    "renewal_age": ("confirm", ""), "start_date": ("confirm", ""),
+    "out_of_network": ("not_offered", "Reimbursement for doctors outside Generali's partner network is not part of the programme."),
+    "prescriptions": ("not_offered", "Prescription medication is not covered under the doctors and tests cover; chronic-condition medication is available only through a separate add-on."),
+    "preventive": ("partial", "Preventive check-ups are limited to the tests listed in the quotation. [CONFIRM: preventive exams are excluded from the Doctors & Exams Premium add-on]"),
+    "overseas": ("partial", "Hospital stays abroad are covered at 100% (90% in the USA and Canada) on the quotation I have; outpatient care abroad is not part of the programme. [CONFIRM against the wording]"),
+}
+_GEN_PHRASE = {"exclusions": "the exclusions", "pre_existing": "how pre-existing conditions are treated",
+               "direct_billing": "direct billing", "premium": "the annual premium", "underwriting": "the medical underwriting requirements",
+               "renewal_age": "renewal terms and age limits", "start_date": "the earliest possible start date"}
+
 # International carriers Ashlar can compare. Edit here to change who the drafts name.
 INTERNATIONAL_CARRIERS = ("VUMI", "Bupa", "Cigna", "Allianz Care", "IMG", "APRIL International",
                           "OneHealth", "Now Health", "Morgan Price")
@@ -217,6 +238,36 @@ def _join(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
+def _generali_position(r: Routing, skip: tuple[str, ...] = ()) -> list[str]:
+    """Plain statements about requested points Generali does not offer in full."""
+    lines = [GENERALI_WORDING[x][1] for x in r.requests
+             if GENERALI_WORDING.get(x, ("", ""))[0] in ("not_offered", "partial") and x not in skip]
+    return [" ".join(lines), ""] if lines else []
+
+
+def generali_promises(r: Routing) -> list[str]:
+    """What the reply promises for the Generali option: only items its wording supports or Generali confirms."""
+    wanted = ["exclusions"] + [x for x in r.requests if x in _GEN_PHRASE]
+    out: list[str] = []
+    for x in wanted:
+        if GENERALI_WORDING[x][0] in ("wording", "confirm") and x not in out:
+            out.append(x)
+    return out
+
+
+def _generali_sentences(r: Routing) -> list[str]:
+    items = generali_promises(r)
+    said = [GENERALI_WORDING[x][0] for x in items]
+    wording = [_GEN_PHRASE[x] for x, k in zip(items, said) if k == "wording"]
+    confirm = [_GEN_PHRASE[x] for x, k in zip(items, said) if k == "confirm"]
+    out = []
+    if wording:
+        out.append(f"For the Generali option I will send {_join(wording)} as the policy wording states them.")
+    if confirm:
+        out.append(f"I will confirm {_join(confirm)} with Generali.")
+    return out
+
+
 def _acknowledge(r: Routing) -> list[str]:
     """One paragraph saying we read what they asked, or an empty list when nothing specific was asked."""
     labels = [_REQ[x][0] for x in r.requests if _REQ[x][0]]
@@ -233,9 +284,20 @@ def _provide(r: Routing) -> str:
 
 
 def coverage(r: Routing) -> dict[str, str]:
-    """For the broker: each request found in the lead and whether the reply answers it now or promises it."""
-    now = ANSWERED_NOW if r.track != INTERNATIONAL else {"info_needed"}
-    return {x: ("answered" if x in now else "promised") for x in r.requests}
+    """For the broker: each request and how the reply treats it.
+    answered = facts are in the reply; promised = Generali wording or confirmation follows; ipmi_only = Generali does not offer it."""
+    out: dict[str, str] = {}
+    for x in r.requests:
+        kind = GENERALI_WORDING.get(x, ("confirm", ""))[0]
+        if r.track == INTERNATIONAL:
+            out[x] = "answered" if x == "info_needed" else "promised"
+        elif x in ANSWERED_NOW:
+            out[x] = "answered"
+        elif kind in ("not_offered", "partial"):
+            out[x] = "ipmi_only" if kind == "not_offered" else "answered"
+        else:
+            out[x] = "promised"
+    return out
 
 
 def draft_acknowledgement(r: Routing, name: str = "") -> str:
@@ -272,7 +334,7 @@ def draft_reply(r: Routing, name: str = "") -> str:
     elif r.track == GENERALI:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
                *_acknowledge(r), "Generali covers hospitalisation in Greece and, within its partner network, on a recent Generali quotation:", ""]
-        out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, ""] + review
+        out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, ""] + _generali_position(r) + [" ".join(_generali_sentences(r)), ""] + review
     else:  # MIXED
         wants = _join([_WANTS[h.rule] for h in r.gaps if h.rule in _WANTS])
         out = [who, "",
@@ -293,7 +355,9 @@ def draft_reply(r: Routing, name: str = "") -> str:
         out += ["If these are not a high priority, we can instead provide a Generali hospital cover quotation alongside the IPMI one, "
                 "so you can compare both and decide what suits you best."
                 + (" Generali requires a valid Greek AFM for each adult." if r.afm != "has" else ""), "",
-                f"For each option we will provide {_provide(r)}.", ""] + review
+                *_generali_position(r, skip=("out_of_network",)),
+                " ".join(_generali_sentences(r)), "",
+                f"For the international options we will also provide {_provide(r)}.", ""] + review
 
     out += ["To prepare your quotation, please send us:"] + questions + [""] + sign
     return "\n".join(out)

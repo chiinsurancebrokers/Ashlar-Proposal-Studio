@@ -107,7 +107,7 @@ def test_every_request_in_the_lead_is_acknowledged_and_answered_or_promised():
     assert "renewal_age" not in r.requests  # "coverage limits" must not read as "age limits"
     d = draft_reply(r, name="Julian")
     assert "You asked about" in d and "the participating hospital list" in d
-    assert "deductible options" in d.split("For each option we will provide")[1]
+    assert "deductible options" in d.split("For the international options we will also provide")[1]
     assert set(coverage(r).values()) <= {"answered", "promised"} and set(coverage(r)) == set(r.requests)
 
 
@@ -118,7 +118,7 @@ def test_long_checklist_lead_gets_every_item_promised():
             "start_date", "prescriptions", "preventive", "overseas", "direct_billing"} <= set(r.requests)
     d = draft_reply(r)
     assert "detailed list of questions" in d
-    promised = d.split("For each option we will provide")[1].split(".")[0]
+    promised = d.split("For the international options we will also provide")[1].split(".")[0]
     for phrase in ("the annual premium", "renewal terms and age limits", "the earliest possible start date", "prescription cover", "overseas cover"):
         assert phrase in promised
     assert coverage(r)["premium"] == "promised"
@@ -130,3 +130,24 @@ def test_acknowledgement_is_short_and_asks_the_afm_question_once():
     assert a.startswith("Dear Julian,") and "I have received it" in a and a.count("Greek AFM") == 1
     assert len(a.splitlines()) < 22
     assert "Greek AFM" not in draft_acknowledgement(route("I have no AFM. I want hospital cover."))
+
+
+def test_generali_side_never_promises_what_its_wording_does_not_offer():
+    from core.lead_router import GENERALI_WORDING, generali_promises, coverage
+    for lead in (LEAD_FAMILY, LEAD_COUPLE):
+        r = route(lead)
+        promised = generali_promises(r)
+        # nothing the wording does not offer, and nothing partial, is promised for Generali
+        assert all(GENERALI_WORDING[x][0] in ("wording", "confirm") for x in promised)
+        d = draft_reply(r)
+        gen = [ln for ln in d.splitlines() if ln.startswith(("For the Generali option", "I will confirm"))]
+        for banned in ("out-of-network", "prescription", "overseas", "worldwide"):
+            assert not any(banned in ln for ln in gen), (banned, gen)
+        assert "For each option we will provide" not in d
+    assert coverage(route(LEAD_FAMILY))["out_of_network"] == "ipmi_only"
+    assert coverage(route(LEAD_COUPLE))["prescriptions"] == "ipmi_only"
+
+
+def test_every_request_has_a_generali_position():
+    from core.lead_router import GENERALI_WORDING, REQUEST_RULES
+    assert {rid for rid, *_ in REQUEST_RULES} <= set(GENERALI_WORDING)

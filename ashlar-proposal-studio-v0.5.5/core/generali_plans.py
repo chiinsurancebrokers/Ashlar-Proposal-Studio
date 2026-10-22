@@ -42,9 +42,10 @@ def network_text(plan: str) -> str:
 
 
 LIFE_ON_POINTS = [
-    "Hospital cover (Hospital Premium Flexi): annual capital €620,000 per person, room category A, 100% in Greece and abroad "
+    "Hospital cover (Hospital Premium Flexi): annual capital €620,000 per person, 100% in Greece and abroad "
     "(95% in the USA and Canada) after your participation, and 100% with no participation in public hospitals. Partner hospitals "
-    "settle directly with Generali, so you pay only your participation. [CONFIRM: figures are from a recent quote for one adult; check what room category A means in the wording]",
+    "settle directly with Generali, so you pay only your participation. [CONFIRM: figures are from a recent quote for one adult]",
+    "You choose your room: A (private) or B (semi-private). The quote I have is for room A.",
     "You choose your participation: €0, €750, €1,500, €3,000, €5,000 or €10,000 a year, and a higher participation lowers the premium. "
     "With €750 or €1,500, the seven listed serious-illness categories carry no participation.",
     "Wide network of partner hospitals, including " + network_text(LIFE_ON) + ".",
@@ -61,7 +62,7 @@ LIFE_ON_WAITS = ("Waiting periods follow the policy wording for each module: hos
 
 MEDICAL_PRIME_POINTS = [
     "Hospital stays in Greece covered at 100% with no participation, up to €300,000 a year per person, in Generali's partner hospitals: "
-    "Hygeia and Mitera (Hygeia Group) in Athens and Euromedica in Thessaloniki. A first-class room adds €100 a night. "
+    "Hygeia and Mitera (Hygeia Group) in Athens and Euromedica in Thessaloniki. The room is B (semi-private) by default, and you can upgrade to room A (private) for a contribution of €100 a night. "
     "Partner hospitals settle directly with Generali. "
     "[CONFIRM: these figures come from a recent quote for one adult and may differ on your family quote; the quote shows no participation 'with use of a social insurance fund', so check how it applies if you do not use one]",
     "You choose your participation when the policy starts, and a higher one lowers the premium. [CONFIRM: the participation options for this plan]",

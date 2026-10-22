@@ -157,7 +157,7 @@ _IPMI_POINTS = {
 MEDICAL_PRIME_POINTS = [
     "Hospital stays in Greece covered at 100% with no participation, up to €300,000 a year per person, in Generali's partner hospitals: "
     "Hygeia and Mitera (Hygeia Group) in Athens and Euromedica in Thessaloniki. A first-class room adds €100 a night. "
-    "[CONFIRM: the quote shows no participation 'with use of a social insurance fund'; check how it applies if you do not use one]",
+    "[CONFIRM: these figures come from a recent quote for one adult and may differ on your family quote; the quote shows no participation 'with use of a social insurance fund', so check how it applies if you do not use one]",
     "Unlimited scheduled visits to partner doctors, €10 per visit.",
     "Emergencies: a visit to a partner doctor on duty has no participation; a partner specialist called out in an emergency costs €50.",
     "Diagnostic tests and medical procedures: up to €1,500 per insurance year, with 15% participation, on referral from a partner doctor.",
@@ -208,16 +208,16 @@ def draft_reply(r: Routing, name: str = "") -> str:
                f"What I can do is compare international health plans for you from providers such as {_CARRIERS}.", ""]
     elif r.track == GENERALI:
         out = [who, "", "Thank you for your enquiry. " + DISCLOSURE, "",
-               "Generali Medical Prime covers hospitalisation in Greece and, within Generali's partner network:", ""]
+               "Generali covers hospitalisation in Greece and, within its partner network, on a recent Generali quotation:", ""]
         out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, ""] + review
     else:  # MIXED
         wants = _join([_WANTS[h.rule] for h in r.gaps if h.rule in _WANTS])
         out = [who, "",
                "Thank you for your enquiry and for considering Generali as your health insurance provider. Generali is a well-known insurer "
                "in Greece, distinguished for its hospital cover and the range of benefits it offers.", "",
-               "To be fully transparent about your requirements: Generali's Medical Prime programme covers hospitalisation in Greece very well, "
-               "but doctors, tests and emergency visits are covered only within its partner network. Routine visits to private doctors and "
-               "specialists of your own choice are not included. In more detail:", ""]
+               "To be fully transparent about your requirements: Generali's programmes cover hospitalisation in Greece very well, "
+               "but doctors, tests and emergency visits are covered only within their partner network. Routine visits to private doctors and "
+               "specialists of your own choice are not included. In more detail, on a recent Generali quotation:", ""]
         out += [f"* {x}" for x in MEDICAL_PRIME_POINTS] + ["", MEDICAL_PRIME_WAITS, "",
                f"Since you are looking for {wants}, we would recommend an international private medical insurance (IPMI) plan, "
                "and for this reason your enquiry has been passed to me.", "",

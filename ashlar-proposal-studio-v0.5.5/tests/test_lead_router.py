@@ -73,8 +73,8 @@ def test_international_draft_does_not_pitch_life_on():
 
 
 def test_mixed_draft_uses_the_quote_figures_and_the_brokers_structure():
-    d = draft_reply(route(LEAD_FAMILY), name="Julian")
-    assert d.startswith("Dear Julian,") and "Medical Prime" in d
+    d = draft_reply(route(LEAD_FAMILY), name="Julia")
+    assert d.startswith("Dear Julia,") and "Medical Prime" not in d  # she did not ask for it
     assert "Unlimited scheduled visits to partner doctors, €10 per visit" in d  # the maximum visits in the quote
     assert "Hygeia" in d and "Euromedica" in d and "€300,000" in d
     assert "one month after the start" in d and "ten years" in d

@@ -45,7 +45,7 @@ LIFE_ON_POINTS = [
     "Hospital cover (Hospital Premium Flexi): annual capital €620,000 per person, 100% in Greece and abroad "
     "(95% in the USA and Canada) after your participation, and 100% with no participation in public hospitals. Partner hospitals "
     "settle directly with Generali, so you pay only your participation. [CONFIRM: figures are from a recent quote for one adult]",
-    "You choose your room: A (private) or B (semi-private). The quote I have is for room A.",
+    "You choose your room: A (private) or B (semi-private). Room A has a higher premium than the same cover with room B. The quote I have is for room A.",
     "You choose your participation: €0, €750, €1,500, €3,000, €5,000 or €10,000 a year, and a higher participation lowers the premium. "
     "With €750 or €1,500, the seven listed serious-illness categories carry no participation.",
     "Wide network of partner hospitals, including " + network_text(LIFE_ON) + ".",

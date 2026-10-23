@@ -230,7 +230,11 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
             if state == UNKNOWN:
                 cells.append(f'<span class="dim">{e(label)}</span>')
             else:
-                cells.append(e(label))
+                text = f"<b>{e(label)}</b>"
+                detail = offer.details.get(key)
+                if detail:                      # the limits and participations as the quote states them
+                    text += f'<br><span class="dim">{e(detail)}</span>'
+                cells.append(text)
             if need is None:
                 cells[-1] = f'<span class="dim">{cells[-1]}</span>' if state != UNKNOWN else cells[-1]
         benefit_rows.append(cells)

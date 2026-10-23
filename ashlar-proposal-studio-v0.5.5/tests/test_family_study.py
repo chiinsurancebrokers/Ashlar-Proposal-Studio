@@ -125,3 +125,10 @@ def test_reasons_are_a_ticked_list_with_text_beside_every_mark():
     assert 'class="checks"' in html and "✓" in html and "–" in html
     assert 'aria-hidden="true">✓</span>Νοσοκομειακά (απαραίτητη): ' in html
     assert "Δεν φαίνεται στην προσφορά" in html and 'class="legend"' in html
+
+
+def test_benefit_grid_states_the_quoted_limits():
+    outcome, people = _two_katja_options()
+    html = render_family_study(outcome, people, lang="el")
+    grid = html.split("Τι καλύπτει κάθε πρόγραμμα")[1].split("Σύγκριση επιλογών")[0]
+    assert "Έως €1.000.000" in grid

@@ -40,6 +40,7 @@ _STRINGS = {
         "fair2": "Prices come from the insurers' own quotes, never from an AI estimate. Benefit summaries are simplified from the insurers' documents; the policy wording prevails.",
         "fair3": "Not everyone needs international cover. If a local plan fits, we say so. The public health system remains an essential safety net. This is not an offer of cover. Final eligibility, terms and premium are confirmed by each insurer after underwriting, and nothing is assumed about pre-existing conditions until the insurer confirms in writing.",
         "compare": "How the options compare for {name}",
+        "legend": "✓ Covered · ▲ Covered with a limit · ○ Covered, approval needed first · ✕ Not covered · – Not shown in the quote",
         "waiting": "Waiting periods", "condition": "Condition", "covered_after": "Covered after",
         "nl": ".", "dec": ".", "thou": ",",
     },
@@ -66,6 +67,7 @@ _STRINGS = {
         "fair2": "Οι τιμές προέρχονται από τις προσφορές των ίδιων των ασφαλιστικών εταιριών και όχι από εκτίμηση της AI. Η περίληψη παροχών βασίζεται στα έγγραφα των ασφαλιστών. Το ασφαλιστήριο συμβόλαιο είναι η τελική πηγή.",
         "fair3": "Δεν χρειάζονται όλοι διεθνή κάλυψη. Αν ταιριάζει ένα τοπικό πρόγραμμα, θα το πούμε. Το δημόσιο σύστημα υγείας παραμένει απαραίτητο δίχτυ ασφαλείας. Πρόκειται για προκαταρκτική σύγκριση και όχι για προσφορά κάλυψης. Η τελική επιλεξιμότητα, οι όροι και το ασφάλιστρο επιβεβαιώνονται από κάθε ασφαλιστική εταιρία μετά την ανάληψη κινδύνου. Καμία προϋπάρχουσα πάθηση δεν θεωρείται δεδομένη μέχρι να το επιβεβαιώσει γραπτώς η ασφαλιστική εταιρία.",
         "compare": "Σύγκριση επιλογών για {name}",
+        "legend": "✓ Καλύπτεται · ▲ Καλύπτεται με όριο · ○ Με προηγούμενη έγκριση · ✕ Δεν καλύπτεται · – Δεν φαίνεται στην προσφορά",
         "waiting": "Περίοδοι αναμονής", "condition": "Πάθηση", "covered_after": "Καλύπτεται μετά",
         "nl": ".", "dec": ",", "thou": ".",
     },
@@ -82,9 +84,9 @@ _STATE_KEY = {COVERED: "covered", SUB_LIMIT: "sub_limit", ACTION: "action", NOT_
               UNKNOWN: "unknown"}
 
 CSS = """
-:root{--bg:#151C27;--panel:#1B2432;--head:#111824;--ink:#ECE6DB;--muted:#B4BBC7;--line:#3C4A60;--gold:#D4A849;color-scheme:dark}
-@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#F6F3EC;--panel:#FFFFFF;--head:#ECE6D8;--ink:#1B2432;--muted:#4C586A;--line:#CDC5B3;--gold:#8A6212;color-scheme:light}}
-:root[data-theme="light"]{--bg:#F6F3EC;--panel:#FFFFFF;--head:#ECE6D8;--ink:#1B2432;--muted:#4C586A;--line:#CDC5B3;--gold:#8A6212;color-scheme:light}
+:root{--bg:#151C27;--panel:#1B2432;--head:#111824;--ink:#ECE6DB;--muted:#B4BBC7;--line:#3C4A60;--gold:#D4A849;--ok:#5CC49A;--warn:#E0B24F;--bad:#E88377;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#F6F3EC;--panel:#FFFFFF;--head:#ECE6D8;--ink:#1B2432;--muted:#4C586A;--line:#CDC5B3;--gold:#8A6212;--ok:#1F7A5A;--warn:#8A6212;--bad:#A33A2E;color-scheme:light}}
+:root[data-theme="light"]{--bg:#F6F3EC;--panel:#FFFFFF;--head:#ECE6D8;--ink:#1B2432;--muted:#4C586A;--line:#CDC5B3;--gold:#8A6212;--ok:#1F7A5A;--warn:#8A6212;--bad:#A33A2E;color-scheme:light}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:1100px;margin:auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .page{padding-block:44px;border-bottom:1px solid var(--line);min-width:0}
@@ -94,6 +96,7 @@ p{margin:0 0 18px;max-width:75ch}.note{font-size:13px;color:var(--muted);border-
 .table-wrap{overflow-x:auto;margin:22px 0;max-width:100%}table{border-collapse:collapse;width:100%;background:var(--panel);font-size:14px}
 th,td{border:1px solid var(--line);padding:14px;text-align:left;vertical-align:top}th{color:var(--gold);background:var(--head);font-size:12px}
 td:first-child{font-weight:550}.num{font-variant-numeric:tabular-nums}.dim{color:var(--muted)}
+h3{font-size:17px;margin:22px 0 6px}.checks{list-style:none;padding:0;margin:0 0 14px}.checks li{padding:3px 0}.mk{display:inline-block;width:1.5em;font-weight:700}.mk.ok{color:var(--ok)}.mk.warn{color:var(--warn)}.mk.bad{color:var(--bad)}.mk.act,.mk.dim{color:var(--muted)}.legend{font-size:13px;color:var(--muted)}
 footer{padding-block:24px;color:var(--muted);font-size:12px}
 @media(max-width:650px){table{min-width:640px}.page{padding-block:32px}}
 """
@@ -237,7 +240,6 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     other_rows = [[e(_combo_label(x, prof)), _money(x.total, s), _fit(x.fit, s)] for x in outcome.ranked[:top]]
     others = _table([s["combo"], s["cost"], s["fit"]], other_rows, numeric=(1, 2))
 
-    reasons = "".join(f"<li>{e(line)}</li>" for line in _reasons(best, prof, lang))
     conf = confirmations(outcome, profiles, lang) + list(extra_points)
     conf_html = ("<ul>" + "".join(f"<li>{e(c)}</li>" for c in conf) + "</ul>") if conf else f"<p>{e(s['none_confirm'])}</p>"
     waiting_html = ""
@@ -259,7 +261,7 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
         (s["title"], f"<p>{e(s['prepared'])} {who}{e(today)}</p><p>{e(s['intro'])}</p>"
                      f"<h2>{e(s['people'])}</h2>{covers}<h2>{e(s['chosen'])}</h2>{costs}"
                      f"<p>{_money(best.total, s)} {e(s['per_year'])}, {_money(best.total / 12, s)} {e(s['per_month'])}.</p>"
-                     f"<h2>{e(s['why'])}</h2><ul>{reasons}</ul>"),
+                     f"<h2>{e(s['why'])}</h2>{_reasons_html(best, prof, lang)}"),
         (s["benefits"], benefits + compare_html),
     ]
     if waiting_html:
@@ -272,6 +274,30 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     return (f'<!doctype html><html lang="{s["lang"]}"><head><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width,initial-scale=1"><title>{e(s["title"])}</title><style>{CSS}</style></head>'
             f'<body><main>{body}<footer>Ashlar Assurance | {e(today)}</footer></main></body></html>')
+
+
+_MARK = {COVERED: ("✓", "ok"), SUB_LIMIT: ("▲", "warn"), ACTION: ("○", "act"), NOT_COVERED: ("✕", "bad"),
+         UNKNOWN: ("–", "dim")}
+
+
+def _reasons_html(best: Selection, prof: dict, lang: str) -> str:
+    """One block per person: the plan, then one ticked line per need. The text stays beside every
+    mark, so the state never rests on the colour or the shape alone."""
+    s = _STRINGS[lang]
+    e = escape
+    out = ""
+    for offer in best.offers:
+        for person in offer.persons:
+            p = prof[person]
+            items = ""
+            for need in p.needs:
+                state = offer.benefits.get(need.benefit, UNKNOWN)
+                mark, cls = _MARK[state]
+                tag = f" ({s['must']})" if need.weight == MUST else ""
+                items += (f'<li><span class="mk {cls}" aria-hidden="true">{mark}</span>'
+                          f"{e(_benefit(need.benefit, lang))}{e(tag)}: {e(s[_STATE_KEY[state]])}</li>")
+            out += f"<h3>{e(p.name)}: {e(offer.label)}</h3><ul class=\"checks\">{items}</ul>"
+    return out + f'<p class="legend">{e(s["legend"])}</p>'
 
 
 def _reasons(best: Selection, prof: dict, lang: str) -> list[str]:

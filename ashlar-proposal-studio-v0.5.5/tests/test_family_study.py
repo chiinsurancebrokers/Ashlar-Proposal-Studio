@@ -117,3 +117,11 @@ def test_waiting_table_follows_plan_name_and_covers_alternatives():
     assert "Hospital Standard (Article 5)" in html and "Hospital Premium Flexi" not in html
     assert "Doctors &amp; Exams Premium (Article 3)" in html
     assert "Εθνική Προνομιακή Προστασία (offer" in html
+
+
+def test_reasons_are_a_ticked_list_with_text_beside_every_mark():
+    outcome, people = _outcome()
+    html = render_family_study(outcome, people, lang="el")
+    assert 'class="checks"' in html and "✓" in html and "–" in html
+    assert 'aria-hidden="true">✓</span>Νοσοκομειακά (απαραίτητη): ' in html
+    assert "Δεν φαίνεται στην προσφορά" in html and 'class="legend"' in html

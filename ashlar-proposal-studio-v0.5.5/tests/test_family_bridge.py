@@ -86,3 +86,9 @@ def test_missing_residence_is_reported_not_guessed():
     from core.family_bridge import profiles_from_tables
     profiles, warnings = profiles_from_tables([{"Name": "Ana", "Residence": "", "Budget": "Normal"}], [])
     assert profiles == [] and "residence is missing" in warnings[0]
+
+
+def test_person_key_keeps_greek_letters_and_keeps_names_apart():
+    from core.family_bridge import person_key
+    assert person_key("Δεύτερη κόρη") and person_key("Κάτια") != person_key("Κατερίνα")
+    assert person_key("Anna Maria") == "anna-maria"

@@ -80,6 +80,7 @@ class Offer:
     benefits: Mapping[str, str] = field(default_factory=dict)  # benefit -> COVERED / SUB_LIMIT / ...
     quotes: tuple[PersonQuote, ...] = ()
     stand_in: bool = False
+    details: Mapping[str, str] = field(default_factory=dict)  # benefit -> text to show next to the state
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "yearly", _money(self.yearly))

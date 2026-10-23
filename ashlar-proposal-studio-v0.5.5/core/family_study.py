@@ -39,6 +39,7 @@ _STRINGS = {
         "fair1": "A licensed Ashlar broker reviews every recommendation before anything is placed.",
         "fair2": "Prices come from the insurers' own quotes, never from an AI estimate. Benefit summaries are simplified from the insurers' documents; the policy wording prevails.",
         "fair3": "Not everyone needs international cover. If a local plan fits, we say so. The public health system remains an essential safety net. This is not an offer of cover. Final eligibility, terms and premium are confirmed by each insurer after underwriting, and nothing is assumed about pre-existing conditions until the insurer confirms in writing.",
+        "compare": "How the options compare for {name}",
         "waiting": "Waiting periods", "condition": "Condition", "covered_after": "Covered after",
         "nl": ".", "dec": ".", "thou": ",",
     },
@@ -64,6 +65,7 @@ _STRINGS = {
         "fair1": "Κάθε πρόταση ελέγχεται από αδειοδοτημένο ασφαλιστικό διαμεσολαβητή της Ashlar πριν την τοποθέτηση.",
         "fair2": "Οι τιμές προέρχονται από τις προσφορές των ίδιων των ασφαλιστικών εταιριών και όχι από εκτίμηση της AI. Η περίληψη παροχών βασίζεται στα έγγραφα των ασφαλιστών. Το ασφαλιστήριο συμβόλαιο είναι η τελική πηγή.",
         "fair3": "Δεν χρειάζονται όλοι διεθνή κάλυψη. Αν ταιριάζει ένα τοπικό πρόγραμμα, θα το πούμε. Το δημόσιο σύστημα υγείας παραμένει απαραίτητο δίχτυ ασφαλείας. Πρόκειται για προκαταρκτική σύγκριση και όχι για προσφορά κάλυψης. Η τελική επιλεξιμότητα, οι όροι και το ασφάλιστρο επιβεβαιώνονται από κάθε ασφαλιστική εταιρία μετά την ανάληψη κινδύνου. Καμία προϋπάρχουσα πάθηση δεν θεωρείται δεδομένη μέχρι να το επιβεβαιώσει γραπτώς η ασφαλιστική εταιρία.",
+        "compare": "Σύγκριση επιλογών για {name}",
         "waiting": "Περίοδοι αναμονής", "condition": "Πάθηση", "covered_after": "Καλύπτεται μετά",
         "nl": ".", "dec": ",", "thou": ".",
     },
@@ -119,6 +121,49 @@ def _table(head: Sequence[str], rows: Sequence[Sequence[str]], numeric: Sequence
     return f'<div class="table-wrap"><table><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table></div>'
 
 
+def _combo_label(sel: Selection, prof: dict) -> str:
+    """Plan names with the people they cover, never the internal person keys."""
+    if len(sel.offers) == 1:
+        return sel.offers[0].label
+    return " + ".join(o.label + " (" + ", ".join(prof[x].name for x in o.persons) + ")" for o in sel.offers)
+
+
+def _fit(value: float, s: dict) -> str:
+    return f"{value:.2f}".replace(".", s["dec"])
+
+
+def _compare_section(outcome: Result, prof: dict, lang: str, s: dict, top: int) -> str:
+    """For each person with more than one option in play: the options side by side, with the
+    quoted text beside each state so limits and participations can be compared."""
+    e = escape
+    options: dict[str, list] = {}
+    for sel in outcome.ranked[:top]:
+        for o in sel.offers:
+            for person in o.persons:
+                bucket = options.setdefault(person, [])
+                if o.label not in [x.label for x in bucket]:
+                    bucket.append(o)
+    html = ""
+    for person, offers in options.items():
+        if len(offers) < 2:
+            continue
+        p = prof[person]
+        rows = [[e(s["cost"])] + [_money(o.yearly, s) for o in offers]]
+        for need in p.needs:
+            cells = [e(_benefit(need.benefit, lang))]
+            for o in offers:
+                state = o.benefits.get(need.benefit, UNKNOWN)
+                text = f"<b>{e(s[_STATE_KEY[state]])}</b>"
+                detail = o.details.get(need.benefit)
+                if detail:
+                    text += f'<br><span class="dim">{e(detail)}</span>'
+                cells.append(text)
+            rows.append(cells)
+        html += f"<h2>{e(s['compare'].format(name=p.name))}</h2>" + _table(
+            [s["benefit"]] + [o.label for o in offers], rows)
+    return html
+
+
 def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str) -> list[str]:
     s = _STRINGS[lang]
     lines: list[str] = []
@@ -143,7 +188,7 @@ def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str) -> li
 
 def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: str = "en",
                         client_name: str = "", on: date | None = None, top: int = 6,
-                        riders: dict | None = None) -> str:
+                        riders: dict | None = None, extra_points: Sequence[str] = ()) -> str:
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -189,15 +234,15 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     heads = [s["benefit"]] + [f"{prof[person].name}: {offer.label}" for person, offer in columns]
     benefits = _table(heads, benefit_rows)
 
-    other_rows = [[e(x.label), _money(x.total, s), f"{x.fit:.2f}"] for x in outcome.ranked[:top]]
+    other_rows = [[e(_combo_label(x, prof)), _money(x.total, s), _fit(x.fit, s)] for x in outcome.ranked[:top]]
     others = _table([s["combo"], s["cost"], s["fit"]], other_rows, numeric=(1, 2))
 
     reasons = "".join(f"<li>{e(line)}</li>" for line in _reasons(best, prof, lang))
-    conf = confirmations(outcome, profiles, lang)
+    conf = confirmations(outcome, profiles, lang) + list(extra_points)
     conf_html = ("<ul>" + "".join(f"<li>{e(c)}</li>" for c in conf) + "</ul>") if conf else f"<p>{e(s['none_confirm'])}</p>"
     waiting_html = ""
     shown: list[str] = []
-    for offer in best.offers:
+    for offer in [o for sel in [best] + list(outcome.ranked[:top]) for o in sel.offers]:
         for key in waiting_periods.tables_for(offer.label, (riders or {}).get(offer.label, ())):
             if key in shown:
                 continue
@@ -206,24 +251,27 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
             waiting_html += (f"<h2>{e(t['title'][lang])}</h2><p>{e(t['intro'][lang])}</p>"
                              + _table([s["condition"], s["covered_after"]],
                                       [[e(a), e(b)] for a, b in waiting_periods.rows(key, lang)]))
-    if waiting_html:
-        waiting_html = (f'<section class="page"><div class="eyebrow">{e(s["eyebrow"])} / 03</div>'
-                        f'<h1>{e(s["waiting"])}</h1>{waiting_html}</section>')
     today = _fmt_date(on or date.today(), lang)
     who = f"<b>{e(client_name)}</b> | " if client_name else ""
 
-    return f"""<!doctype html><html lang="{s['lang']}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{e(s['title'])}</title><style>{CSS}</style></head><body><main>
-<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 01</div><h1>{e(s['title'])}</h1>
-<p>{e(s['prepared'])} {who}{e(today)}</p><p>{e(s['intro'])}</p>
-<h2>{e(s['people'])}</h2>{covers}
-<h2>{e(s['chosen'])}</h2>{costs}
-<p>{_money(best.total, s)} {e(s['per_year'])}, {_money(best.total / 12, s)} {e(s['per_month'])}.</p>
-<h2>{e(s['why'])}</h2><ul>{reasons}</ul></section>
-<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 02</div><h1>{e(s['benefits'])}</h1>{benefits}</section>
-{waiting_html}<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 04</div><h1>{e(s['all'])}</h1>{others}<p class="note">{e(s['sorted'])}</p></section>
-<section class="page"><div class="eyebrow">{e(s['eyebrow'])} / 05</div><h1>{e(s['confirm'])}</h1>{conf_html}
-<p class="note">{e(s['fair1'])}</p><p class="note">{e(s['fair2'])}</p><p class="note">{e(s['fair3'])}</p></section>
-<footer>Ashlar Assurance | {e(today)}</footer></main></body></html>"""
+    compare_html = _compare_section(outcome, prof, lang, s, top)
+    sections = [
+        (s["title"], f"<p>{e(s['prepared'])} {who}{e(today)}</p><p>{e(s['intro'])}</p>"
+                     f"<h2>{e(s['people'])}</h2>{covers}<h2>{e(s['chosen'])}</h2>{costs}"
+                     f"<p>{_money(best.total, s)} {e(s['per_year'])}, {_money(best.total / 12, s)} {e(s['per_month'])}.</p>"
+                     f"<h2>{e(s['why'])}</h2><ul>{reasons}</ul>"),
+        (s["benefits"], benefits + compare_html),
+    ]
+    if waiting_html:
+        sections.append((s["waiting"], waiting_html))
+    sections.append((s["all"], others + f'<p class="note">{e(s["sorted"])}</p>'))
+    sections.append((s["confirm"], conf_html + f'<p class="note">{e(s["fair1"])}</p><p class="note">{e(s["fair2"])}</p>'
+                                              f'<p class="note">{e(s["fair3"])}</p>'))
+    body = "".join(f'<section class="page"><div class="eyebrow">{e(s["eyebrow"])} / {i:02d}</div><h1>{e(h)}</h1>{b}</section>'
+                   for i, (h, b) in enumerate(sections, 1))
+    return (f'<!doctype html><html lang="{s["lang"]}"><head><meta charset="utf-8"><meta name="viewport" '
+            f'content="width=device-width,initial-scale=1"><title>{e(s["title"])}</title><style>{CSS}</style></head>'
+            f'<body><main>{body}<footer>Ashlar Assurance | {e(today)}</footer></main></body></html>')
 
 
 def _reasons(best: Selection, prof: dict, lang: str) -> list[str]:

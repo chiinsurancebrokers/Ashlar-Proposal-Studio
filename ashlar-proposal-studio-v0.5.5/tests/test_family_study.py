@@ -80,3 +80,40 @@ def test_save_family_mix_needs_a_case(monkeypatch):
     from core.case_archive import CaseArchiveError, save_family_mix
     with pytest.raises(CaseArchiveError):
         save_family_mix("", {})
+
+
+def _two_katja_options():
+    people = [profile("katja", "Katja", "Greece", {"inpatient": "Must have", "outpatient": "Medium"}, "High")]
+    def r(p, plan, amt, freq, disp=None, **b):
+        return {"provider": p, "target_plan": plan, "analysis": {"provider": p, "plan_name": plan,
+                "premium": {"amount": amt, "currency": "EUR", "frequency": freq}, "benefits": b, "benefit_display": disp or {}}}
+    results = [r("Εθνική", "Προνομιακή Προστασία", "83.48", "monthly", {"inpatient": "Έως €1.000.000"},
+                 inpatient="Up to EUR 1,000,000 per year", outpatient="Unlimited visits at EUR 10"),
+               r("Generali", "Life On Standard", "116.87", "monthly", {"inpatient": "Έως €50.000"},
+                 inpatient="Up to EUR 50,000 per year", outpatient="Unlimited visits at EUR 20")]
+    offers, _ = offers_from_assignments(results, {0: ["katja"], 1: ["katja"]})
+    return optimise(people, offers), people
+
+
+def test_compare_section_shows_each_option_with_its_quoted_text():
+    outcome, people = _two_katja_options()
+    html = render_family_study(outcome, people, lang="el")
+    assert "Σύγκριση επιλογών για Katja" in html
+    assert "Έως €1.000.000" in html and "Έως €50.000" in html
+    assert "€1.402,44" in html and "€1.001,76" in html
+
+
+def test_combination_labels_use_names_not_keys_and_fit_uses_greek_decimals():
+    outcome, people = _outcome()
+    html = render_family_study(outcome, people, lang="el")
+    assert "(katja)" not in html and "(d1)" not in html
+    import re
+    assert re.search(r"\b0,\d\d\b", html) and not re.search(r"<td class=\"num\">0\.\d\d<", html)
+
+
+def test_waiting_table_follows_plan_name_and_covers_alternatives():
+    outcome, people = _two_katja_options()
+    html = render_family_study(outcome, people, lang="en", riders={"Generali Life On Standard": ["doctors_exams_premium"]})
+    assert "Hospital Standard (Article 5)" in html and "Hospital Premium Flexi" not in html
+    assert "Doctors &amp; Exams Premium (Article 3)" in html
+    assert "Εθνική Προνομιακή Προστασία (offer" in html

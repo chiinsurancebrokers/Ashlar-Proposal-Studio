@@ -52,6 +52,19 @@ def benefit_states(analysis: Mapping) -> dict[str, str]:
     return {key: benefit_state(benefits.get(key)) for key in BENEFITS}
 
 
+def benefit_details(analysis: Mapping) -> dict[str, str]:
+    """The text to show beside each benefit state. ``benefit_display`` (for example the same cells in
+    the client's language) wins over ``benefits``; blank cells are left out."""
+    shown = analysis.get("benefit_display") or {}
+    benefits = analysis.get("benefits") or {}
+    out: dict[str, str] = {}
+    for key in BENEFITS:
+        text = str(shown.get(key) or benefits.get(key) or "").strip()
+        if text and text.casefold() not in _NOT_SHOWN:
+            out[key] = text
+    return out
+
+
 def plan_display(result: Mapping) -> str:
     analysis = result.get("analysis") or {}
     provider = str(analysis.get("provider") or result.get("provider") or "").strip()
@@ -80,7 +93,7 @@ def offer_from_result(offer_id: str, result: Mapping, persons: Iterable[str], *,
     label = plan_display(result)
     return Offer(offer_id, label, label, persons, Decimal(str(total)),
                  frozenset(r for r in (residences or []) if str(r).strip()) or frozenset({"*"}),
-                 benefit_states(analysis)), ""
+                 benefit_states(analysis), details=benefit_details(analysis)), ""
 
 
 def offers_from_assignments(results: list[Mapping], assignments: Mapping[int, Iterable[str]], *,
@@ -110,7 +123,9 @@ def profile(person: str, name: str, residence: str, needs: Mapping[str, str], bu
 
 
 def _key(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
+    # \w is Unicode-aware, so Greek names keep their letters. An ASCII-only pattern turned
+    # "Δεύτερη κόρη" into an empty key and made two Greek names collide.
+    return re.sub(r"[\W_]+", "-", name.casefold()).strip("-")
 
 
 def profiles_from_tables(people: Iterable[Mapping], needs_table: Iterable[Mapping]) -> tuple[list[Profile], list[str]]:

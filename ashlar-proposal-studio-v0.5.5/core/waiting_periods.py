@@ -9,6 +9,7 @@ from typing import Iterable, Sequence
 
 HOSPITAL = "hospital_premium_flexi"
 DOCTORS = "doctors_exams_premium"
+ON_DEMAND = "doctors_exams_on_demand"
 
 TABLES = {
     HOSPITAL: {
@@ -37,6 +38,17 @@ TABLES = {
         "rows": [
             ("Spinal conditions and complications", "Παθήσεις σπονδυλικής στήλης και επιπλοκές", "After the first (1) insurance year", "Μετά την συμπλήρωση του πρώτου (1) ασφαλιστικού έτους"),
             ("Knee conditions and accidents, and complications", "Παθήσεις και ατυχήματα γόνατος και επιπλοκές", "After the first (1) insurance year", "Μετά την συμπλήρωση του πρώτου (1) ασφαλιστικού έτους"),
+        ],
+    },
+    ON_DEMAND: {
+        "title": {"en": "Generali Doctors & Exams On Demand (Article 1)", "el": "Generali Γιατροί & Εξετάσεις On Demand (Άρθρο 1)"},
+        "intro": {
+            "en": "These covers start only after the period shown, counted from the start, reinstatement or change of the cover, or from the date the insured member is added. Prescription lenses can be claimed once every two consecutive insurance years.",
+            "el": "Οι παρακάτω καλύψεις ξεκινούν μόνο μετά το διάστημα που αναγράφεται, από την έναρξη, επαναφορά ή τροποποίηση της παροχής ή από την προσθήκη του ασφαλισμένου μέλους. Τα γυαλιά οράσεως μπορούν να αποζημιωθούν μία φορά κάθε δύο συνεχόμενα ασφαλιστικά έτη.",
+        },
+        "rows": [
+            ("Dental therapies (fillings, extractions, root canals)", "Οδοντιατρικές θεραπείες (σφραγίσματα, εξαγωγές, απονευρώσεις)", "After two (2) consecutive insurance years", "Μετά από δύο (2) συνεχόμενα ασφαλιστικά έτη"),
+            ("Aesthetic medicine (scheduled procedures)", "Αισθητική ιατρική (προγραμματισμένες πράξεις)", "After three (3) consecutive insurance years", "Μετά από τρία (3) συνεχόμενα ασφαλιστικά έτη"),
         ],
     },
 }

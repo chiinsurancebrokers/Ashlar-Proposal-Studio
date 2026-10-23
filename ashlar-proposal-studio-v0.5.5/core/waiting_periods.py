@@ -12,6 +12,7 @@ DOCTORS = "doctors_exams_premium"
 STANDARD = "hospital_standard"
 ETHNIKI = "ethniki_prosfora"
 VUMI = "vumi_euro_health_vip"
+ETHNIKI_TERMS = "ethniki_article10"
 
 TABLES = {
     HOSPITAL: {
@@ -82,7 +83,7 @@ TABLES = {
             "el": "Περίοδοι αναμονής όπως αναγράφονται στην προσφορά. Το ασφαλιστήριο συμβόλαιο είναι η τελική πηγή.",
         },
         "rows": [
-            ("Hospital treatment, surgery without hospital stay and urgent transport due to illness", "Νοσηλεία, χειρουργική επέμβαση χωρίς νοσηλεία και επείγουσα μεταφορά λόγω ασθένειας", "After the first 30 days of the insurance", "Μετά τις πρώτες 30 ημέρες από την έναρξη της ασφάλισης"),
+            ("Hospital treatment, surgery without hospital stay and urgent transport for an illness first appearing in the first 30 days (Article 5A)", "Νοσηλεία, χειρουργική επέμβαση χωρίς νοσηλεία και επείγουσα μεταφορά για ασθένεια που εκδηλώθηκε πρώτη φορά εντός των πρώτων 30 ημερών (Άρθρο 5Α)", "Covered only after the first 30 days of the insurance. Nothing is paid for those 30 days", "Καλύπτεται μόνο μετά τις πρώτες 30 ημέρες από την έναρξη. Για αυτό το διάστημα δεν καταβάλλεται καμία αποζημίωση"),
             ("Tonsils or adenoids, hernia, and women's genital organs. Also hospitals outside the European Union", "Αμυγδαλές ή αδενοειδείς εκβλαστήσεις, κήλη και γεννητικά όργανα της γυναίκας. Επίσης νοσοκομεία εκτός Ευρωπαϊκής Ένωσης", "After the first 6 months of the insurance", "Μετά τους πρώτους 6 μήνες ασφάλισης"),
             ("Pre-existing conditions known and declared on the application, unless excluded for longer by a special term", "Προϋπάρχουσες βλάβες ή ασθένειες που ήταν γνωστές και δηλώθηκαν στην αίτηση, εκτός αν έχουν εξαιρεθεί για μεγαλύτερο διάστημα με ειδικό όρο", "After the first insurance year", "Μετά το πρώτο ασφαλιστικό έτος"),
             ("Haemorrhoids, anal fissure, varicose veins, nasal septum", "Αιμορροΐδες, ραγάδα δακτυλίου, κιρσοί, ρινικό διάφραγμα", "After the first insurance year", "Μετά το πρώτο ασφαλιστικό έτος"),
@@ -102,6 +103,19 @@ TABLES = {
             ("HIV-AIDS", "HIV-AIDS", "36 months", "36 μήνες"),
         ],
     },
+    ETHNIKI_TERMS: {
+        "title": {"en": "Εθνική: end of cover and right to continue (Article 10)", "el": "Εθνική: παύση ισχύος και δικαίωμα συνέχισης (Άρθρο 10)"},
+        "intro": {
+            "en": "From the policy wording, Article 10. The policy wording prevails.",
+            "el": "Από το ασφαλιστήριο, Άρθρο 10. Το ασφαλιστήριο συμβόλαιο είναι η τελική πηγή.",
+        },
+        "rows": [
+            ("Death of the insured", "Θάνατος του Ασφαλισμένου", "The policy ends. Premiums paid after it ends are refunded without interest", "Το ασφαλιστήριο παύει να ισχύει. Ασφάλιστρα που καταβλήθηκαν μετά τη λήξη επιστρέφονται άτοκα"),
+            ("Dependent children", "Εξαρτώμενα παιδιά", "Cover ends at the policy anniversary closest to the 25th birthday, or on marriage if earlier", "Η κάλυψη παύει στην επέτειο του ασφαλιστηρίου που είναι πλησιέστερη στην 25η επέτειο γέννησης, ή με τον γάμο αν προηγηθεί"),
+            ("Child reaching 25: right to continue", "Παιδί που συμπληρώνει τα 25: δικαίωμα συνέχισης", "Individual policy, no insurability check, same or similar programme on the terms of that date. Written request within 1 month of the end of cover", "Ατομικό ασφαλιστήριο, χωρίς έλεγχο ασφαλισιμότητας, με το ίδιο ή παρόμοιο πρόγραμμα και τους όρους της ημερομηνίας αυτής. Έγγραφη αίτηση εντός 1 μηνός από τη λήξη της κάλυψης"),
+            ("Death of the insured: right of dependants (spouse, children) to continue", "Θάνατος του Ασφαλισμένου: δικαίωμα συνέχισης των εξαρτωμένων (σύζυγος, παιδιά)", "Individual policy, no insurability check, same or similar programme. Written request within 1 month of the date of death", "Ατομικό ασφαλιστήριο, χωρίς έλεγχο ασφαλισιμότητας, με το ίδιο ή παρόμοιο πρόγραμμα. Έγγραφη αίτηση εντός 1 μηνός από την ημερομηνία θανάτου"),
+        ],
+    },
 }
 
 
@@ -113,7 +127,7 @@ def tables_for(label: str, riders: Iterable[str] = ()) -> list[str]:
     if "generali" in name:
         keys.append(STANDARD if "standard" in name else HOSPITAL)
     if "εθνική" in name or "ethniki" in name:
-        keys.append(ETHNIKI)
+        keys += [ETHNIKI, ETHNIKI_TERMS]
     if "vumi" in name:
         keys.append(VUMI)
     keys += [r for r in riders if r in TABLES and r not in keys]

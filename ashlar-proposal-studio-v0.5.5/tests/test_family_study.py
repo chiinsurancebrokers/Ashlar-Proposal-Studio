@@ -149,3 +149,26 @@ def test_vumi_waiting_table_matches_by_name():
     rows = dict(wp.rows(wp.VUMI, "en"))
     assert rows["General waiting period"] == "30 days"
     assert rows["HIV-AIDS"] == "36 months"
+
+
+def test_merit_recommendation_ignores_price():
+    from core import plan_quality as pq, waiting_periods as wp
+    cheap = pq.PlanQuality(limit=50_000, deductible=1500, waiting_tables=(wp.STANDARD,), area="abroad", network=2)
+    rich = pq.PlanQuality(limit=3_000_000, deductible=0, waiting_tables=(wp.VUMI,), area="eu", network=5)
+    ranked, dims = pq.rank({"cheap": cheap, "rich": rich})
+    assert ranked[0].key == "rich"
+    assert "exclusions" not in dims            # not rated for either plan, so not scored
+
+
+def test_missing_dimension_is_dropped_for_every_plan():
+    from core import plan_quality as pq
+    a = pq.PlanQuality(limit=1_000_000, network=3)
+    b = pq.PlanQuality(limit=1_000_000)
+    _, dims = pq.rank({"a": a, "b": b})
+    assert dims == ("limit",)
+
+
+def test_every_waiting_period_text_is_readable():
+    from core import plan_quality as pq, waiting_periods as wp
+    for key in (wp.HOSPITAL, wp.DOCTORS, wp.STANDARD, wp.ETHNIKI, wp.VUMI):
+        assert pq.waiting_months([key]) > 0

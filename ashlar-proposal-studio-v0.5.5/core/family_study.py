@@ -14,7 +14,7 @@ from typing import Sequence
 
 from core.benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT, UNKNOWN
 from core.family_bridge import BENEFITS
-from core import waiting_periods
+from core import plan_quality, waiting_periods
 from core.family_optimizer import MUST, Profile, Result, Selection
 
 _STRINGS = {
@@ -96,10 +96,85 @@ p{margin:0 0 18px;max-width:75ch}.note{font-size:13px;color:var(--muted);border-
 .table-wrap{overflow-x:auto;margin:22px 0;max-width:100%}table{border-collapse:collapse;width:100%;background:var(--panel);font-size:14px}
 th,td{border:1px solid var(--line);padding:14px;text-align:left;vertical-align:top}th{color:var(--gold);background:var(--head);font-size:12px}
 td:first-child{font-weight:550}.num{font-variant-numeric:tabular-nums}.dim{color:var(--muted)}
-h3{font-size:17px;margin:22px 0 6px}.checks{list-style:none;padding:0;margin:0 0 14px}.checks li{padding:3px 0}.mk{display:inline-block;width:1.5em;font-weight:700}.mk.ok{color:var(--ok)}.mk.warn{color:var(--warn)}.mk.bad{color:var(--bad)}.mk.act,.mk.dim{color:var(--muted)}.legend{font-size:13px;color:var(--muted)}
+h3{font-size:17px;margin:22px 0 6px}.checks{list-style:none;padding:0;margin:0 0 14px}.checks li{padding:3px 0}.mk{display:inline-block;width:1.5em;font-weight:700}.mk.ok{color:var(--ok)}.mk.warn{color:var(--warn)}.mk.bad{color:var(--bad)}.mk.act,.mk.dim{color:var(--muted)}.legend{font-size:13px;color:var(--muted)}.tag{display:inline-block;margin-left:6px;padding:1px 8px;border:1px solid var(--muted);border-radius:99px;font-size:12px;color:var(--muted);white-space:nowrap}.tag.good{border-color:var(--ok);color:var(--ok);font-weight:600}
 footer{padding-block:24px;color:var(--muted);font-size:12px}
 @media(max-width:650px){table{min-width:640px}.page{padding-block:32px}}
 """
+
+
+_MERIT = {
+    "en": {
+        "title": "Best plan on cover quality", "tag_merit": "Our recommendation: best on cover",
+        "tag_budget": "Best for your budget", "plan": "Plan", "score": "Cover score",
+        "best_merit": "On cover alone, whatever it costs, the strongest plan is {name}.",
+        "best_budget": "For the budget and needs you stated, the best fit is {name}.",
+        "same": "These are the same plan.",
+        "intro": "This ranking looks only at what each plan gives: the annual limit, the participation you pay, the waiting periods, where you are covered and how wide the hospital network is. Price is not part of it. A plan can be the best on cover and still not be the one that fits your budget.",
+        "dims": {"limit": "Annual limit", "deductible": "Participation", "waiting": "Waiting periods",
+                 "area": "Area covered", "network": "Hospital network", "exclusions": "Exclusions"},
+        "scored": "Scored on: {dims}. Each counts equally. Limit, participation, waiting periods and area come from the offers and the policy wordings. Hospital network is the broker's rating.",
+        "left_out": "Not scored, because not rated for every plan: {dims}.",
+        "col_combo": "Combination", "legend_title": "Marks",
+    },
+    "el": {
+        "title": "Το καλύτερο πρόγραμμα βάσει παροχών", "tag_merit": "Η σύστασή μας: καλύτερο βάσει παροχών",
+        "tag_budget": "Καλύτερο για τον προϋπολογισμό σας", "plan": "Πρόγραμμα", "score": "Βαθμός παροχών",
+        "best_merit": "Με βάση μόνο τις παροχές, ανεξάρτητα από το κόστος, το ισχυρότερο πρόγραμμα είναι {name}.",
+        "best_budget": "Για τον προϋπολογισμό και τις ανάγκες που δηλώσατε, η καλύτερη επιλογή είναι {name}.",
+        "same": "Πρόκειται για το ίδιο πρόγραμμα.",
+        "intro": "Η κατάταξη αυτή εξετάζει μόνο όσα προσφέρει κάθε πρόγραμμα: το ετήσιο όριο, τη συμμετοχή που πληρώνετε, τις περιόδους αναμονής, την περιοχή κάλυψης και το πλήθος των νοσοκομείων του δικτύου. Η τιμή δεν συμμετέχει. Ένα πρόγραμμα μπορεί να είναι το καλύτερο σε παροχές και να μην είναι αυτό που ταιριάζει στον προϋπολογισμό σας.",
+        "dims": {"limit": "Ετήσιο όριο", "deductible": "Συμμετοχή", "waiting": "Αναμονές",
+                 "area": "Περιοχή κάλυψης", "network": "Δίκτυο νοσοκομείων", "exclusions": "Εξαιρέσεις"},
+        "scored": "Βαθμολογήθηκαν: {dims}. Κάθε κριτήριο μετράει εξίσου. Όριο, συμμετοχή, αναμονές και περιοχή προέρχονται από τις προσφορές και τα ασφαλιστήρια. Το δίκτυο νοσοκομείων είναι εκτίμηση του συμβούλου.",
+        "left_out": "Δεν βαθμολογήθηκαν, γιατί δεν έχουν αξιολογηθεί για όλα τα προγράμματα: {dims}.",
+        "col_combo": "Συνδυασμός", "legend_title": "Σήμανση",
+    },
+}
+
+
+def _merit(outcome: Result, quality, lang: str):
+    """Merit of every plan and of every combination. Returns (plans ranked, dims, best combination, scores)."""
+    plans = {}
+    for sel in outcome.ranked:
+        for o in sel.offers:
+            if o.plan_key in quality:
+                plans[o.plan_key] = quality[o.plan_key]
+    ranked, dims = plan_quality.rank(plans)
+    by_key = {m.key: m.score for m in ranked}
+    combo = {}
+    for sel in outcome.ranked:
+        keys = [o.plan_key for o in sel.offers for _ in o.persons]
+        combo[id(sel)] = plan_quality.combination_merit(keys, by_key)
+    scored = [x for x in outcome.ranked if combo[id(x)] is not None]
+    best = max(scored, key=lambda x: (combo[id(x)], -float(x.total))) if scored else None
+    return ranked, dims, best, combo
+
+
+def _merit_html(outcome: Result, prof: dict, quality, lang: str, ranked, dims, best) -> str:
+    m = _MERIT[lang]
+    e = escape
+    labels = {o.plan_key: o.label for sel in outcome.ranked for o in sel.offers}
+    rows = []
+    for item in ranked:
+        cells = [e(labels[item.key])]
+        for d in plan_quality.DIMENSIONS:
+            v = item.parts.get(d)
+            cells.append("—" if v is None else f"{v:.2f}".replace(".", "," if lang == "el" else "."))
+        cells.append("<b>" + f"{item.score:.2f}".replace(".", "," if lang == "el" else ".") + "</b>")
+        rows.append(cells)
+    head = [m["plan"]] + [m["dims"][d] for d in plan_quality.DIMENSIONS] + [m["score"]]
+    table = _table(head, rows, numeric=tuple(range(1, len(head))))
+    top_plan = labels[ranked[0].key]
+    budget_plan = outcome.winner.label if len(outcome.winner.offers) == 1 else _combo_label(outcome.winner, prof)
+    same = best is not None and best is outcome.winner
+    out = (f"<p>{e(m['intro'])}</p><p><b>{e(m['best_merit'].format(name=_combo_label(best, prof) if best else top_plan))}</b></p>"
+           f"<p>{e(m['best_budget'].format(name=budget_plan))}" + (f" {e(m['same'])}" if same else "") + "</p>" + table)
+    used = ", ".join(m["dims"][d] for d in dims)
+    out += f'<p class="note">{e(m["scored"].format(dims=used))}</p>'
+    left = [d for d in plan_quality.DIMENSIONS if d not in dims]
+    if left:
+        out += f'<p class="note">{e(m["left_out"].format(dims=", ".join(m["dims"][d] for d in left)))}</p>'
+    return out
 
 
 def _money(value: Decimal | float, s: dict) -> str:
@@ -191,7 +266,8 @@ def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str) -> li
 
 def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: str = "en",
                         client_name: str = "", on: date | None = None, top: int = 6,
-                        riders: dict | None = None, extra_points: Sequence[str] = ()) -> str:
+                        riders: dict | None = None, extra_points: Sequence[str] = (),
+                        quality: dict | None = None) -> str:
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -209,7 +285,8 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
 
     cost_rows = [[e(o.label + (f" ({', '.join(prof[x].name for x in o.persons)})" if len(best.offers) > 1 else "")),
                   _money(o.yearly, s), _money(o.yearly / 12, s)] for o in best.offers]
-    cost_rows.append([f"<b>{e(s['total'])}</b>", f"<b>{_money(best.total, s)}</b>",
+    total_label = s["total"] if len(profiles) > 1 else {"en": "Total", "el": "Σύνολο"}[lang]
+    cost_rows.append([f"<b>{e(total_label)}</b>", f"<b>{_money(best.total, s)}</b>",
                       f"<b>{_money(best.total / 12, s)}</b>"])
     costs = _table([s["plan"], s["cost"], s["month"]], cost_rows, numeric=(1, 2))
 
@@ -243,7 +320,19 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     heads = [s["benefit"]] + [f"{prof[person].name}: {offer.label}" for person, offer in columns]
     benefits = _table(heads, benefit_rows)
 
-    other_rows = [[e(_combo_label(x, prof)), _money(x.total, s), _fit(x.fit, s)] for x in outcome.ranked[:top]]
+    merit_ranked, merit_dims, merit_best, _combo = _merit(outcome, quality, lang) if quality else ([], (), None, {})
+    mm = _MERIT[lang]
+
+    def _tags(x: Selection) -> str:
+        t = ""
+        if merit_best is not None and x is merit_best:
+            t += f' <span class="tag good">{e(mm["tag_merit"])}</span>'
+        if x is outcome.winner:
+            t += f' <span class="tag">{e(mm["tag_budget"])}</span>'
+        return t
+
+    other_rows = [[e(_combo_label(x, prof)) + (_tags(x) if quality else ""), _money(x.total, s), _fit(x.fit, s)]
+                  for x in outcome.ranked[:top]]
     others = _table([s["combo"], s["cost"], s["fit"]], other_rows, numeric=(1, 2))
 
     conf = confirmations(outcome, profiles, lang) + list(extra_points)
@@ -272,6 +361,8 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     ]
     if waiting_html:
         sections.append((s["waiting"], waiting_html))
+    if merit_ranked:
+        sections.append((mm["title"], _merit_html(outcome, prof, quality, lang, merit_ranked, merit_dims, merit_best)))
     sections.append((s["all"], others + f'<p class="note">{e(s["sorted"])}</p>'))
     sections.append((s["confirm"], conf_html + f'<p class="note">{e(s["fair1"])}</p><p class="note">{e(s["fair2"])}</p>'
                                               f'<p class="note">{e(s["fair3"])}</p>'))

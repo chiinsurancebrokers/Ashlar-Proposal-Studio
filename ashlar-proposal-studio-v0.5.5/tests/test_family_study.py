@@ -140,3 +140,12 @@ def test_grid_shows_a_dash_not_unknown_when_the_person_has_no_need():
     grid = html.split("What each plan covers")[1]
     row = [r for r in grid.split("<tr>") if "Dental" in r][0]
     assert "—" in row
+
+
+def test_vumi_waiting_table_matches_by_name():
+    from core import waiting_periods as wp
+    keys = wp.tables_for("VUMI Euro Health VIP Priority")
+    assert keys == [wp.VUMI]
+    rows = dict(wp.rows(wp.VUMI, "en"))
+    assert rows["General waiting period"] == "30 days"
+    assert rows["HIV-AIDS"] == "36 months"

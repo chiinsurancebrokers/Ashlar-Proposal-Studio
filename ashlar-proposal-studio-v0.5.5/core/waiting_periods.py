@@ -11,6 +11,7 @@ HOSPITAL = "hospital_premium_flexi"
 DOCTORS = "doctors_exams_premium"
 STANDARD = "hospital_standard"
 ETHNIKI = "ethniki_prosfora"
+VUMI = "vumi_euro_health_vip"
 
 TABLES = {
     HOSPITAL: {
@@ -90,6 +91,17 @@ TABLES = {
             ("Congenital conditions", "Συγγενείς παθήσεις", "After the first two (2) insurance years. If known and not declared on the application, never covered", "Μετά τα δύο (2) πρώτα ασφαλιστικά έτη. Αν ήταν γνωστές και δεν δηλώθηκαν στην αίτηση, δεν καλύπτονται ποτέ"),
         ],
     },
+    VUMI: {
+        "title": {"en": "VUMI Euro Health VIP Priority (Table of Benefits)", "el": "VUMI Euro Health VIP Priority (Πίνακας Παροχών)"},
+        "intro": {
+            "en": "Waiting periods stated in the Table of Benefits. The policy wording prevails.",
+            "el": "Περίοδοι αναμονής όπως αναγράφονται στον Πίνακα Παροχών. Το ασφαλιστήριο συμβόλαιο είναι η τελική πηγή.",
+        },
+        "rows": [
+            ("General waiting period", "Γενική περίοδος αναμονής", "30 days", "30 ημέρες"),
+            ("HIV-AIDS", "HIV-AIDS", "36 months", "36 μήνες"),
+        ],
+    },
 }
 
 
@@ -102,6 +114,8 @@ def tables_for(label: str, riders: Iterable[str] = ()) -> list[str]:
         keys.append(STANDARD if "standard" in name else HOSPITAL)
     if "εθνική" in name or "ethniki" in name:
         keys.append(ETHNIKI)
+    if "vumi" in name:
+        keys.append(VUMI)
     keys += [r for r in riders if r in TABLES and r not in keys]
     return keys
 

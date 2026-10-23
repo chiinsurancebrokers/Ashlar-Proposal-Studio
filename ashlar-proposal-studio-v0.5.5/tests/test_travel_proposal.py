@@ -26,3 +26,9 @@ def test_no_stray_latin_in_greek_benefits():
 def test_fonts_embedded_cover_greek():
     css = tp.embedded_fonts_css()
     assert "U+0370-03FF" in css and "Noto Serif" in css
+
+
+def test_personal_version_has_no_demo_wording_and_new_number():
+    h = tp.render_html(tp.ZENOVIA).lower()
+    assert "δοκιμαστικ" not in h and "164521" not in h and "165318" in h
+    assert "γουμένου" in h and "15.000" in h

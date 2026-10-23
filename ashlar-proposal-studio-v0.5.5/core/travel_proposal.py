@@ -39,6 +39,9 @@ class TravelQuote:
     demo: bool = False
     assistance: dict = field(default_factory=dict)
     links: list[tuple[str, str, str]] = field(default_factory=list)  # label, note, url (url may be empty)
+    addressee: str = ""      # e.g. "κυρία Γουμένου"; when set the document opens with a greeting
+    prepared_for: str = ""   # full name shown in the header
+    replies: list[tuple[str, str]] = field(default_factory=list)  # (her question, our answer)
 
 
 def _grp(title: str, rows: list[tuple[str, str]]):
@@ -151,12 +154,18 @@ def render_html(q: TravelQuote, embed_fonts: bool = False) -> str:
     ox = f'<i style="color:{OX}">προσφορά</i>'
     head = (f'<div style="background:{INK};border:1px solid {INK};padding:18px 28px"><span style="font-family:{MONO};font-size:11px;'
             f'letter-spacing:.2em;text-transform:uppercase;color:{FINE}">Ashlar Assurance</span>'
-            f'<span style="font-family:{MONO};font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#9db5b2;float:right">ashlarassurance.com</span></div>')
+            f'<span style="font-family:{MONO};font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#9db5b2;float:right">{E(q.prepared_for) if q.prepared_for else "ashlarassurance.com"}</span></div>')
     hero = (_eyebrow("Ταξιδιωτική ασφάλιση" + (" · Δοκιμαστική προσφορά" if q.demo else ""))
             + f'<div style="font-family:{SERIF};font-size:34px;line-height:1.15;font-weight:400;letter-spacing:-.01em;color:{INK};margin:0 0 18px">'
               f'Ταξιδιωτική {ox} για {E(q.destination)}</div>'
             + _table([("Προορισμός", E(q.destination)), ("Ημερομηνίες", E(q.dates)), ("Τύπος ταξιδιού", E(q.trip_type)),
                       ("Ασφαλιζόμενοι", E(q.travellers))]))
+    personal = ""
+    if q.replies:
+        ans = "".join(f'<div style="font-family:{MONO};font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:{INK};margin:14px 0 6px;break-after:avoid">{E(k)}</div>'
+                      + _p(v, m="0") for k, v in q.replies)
+        personal = (_eyebrow("Απαντήσεις στο email σας") + _h2("Οι ερωτήσεις σας")
+                    + _p(f"Αγαπητή {E(q.addressee)}, σας ευχαριστούμε για το μήνυμά σας. Παρακάτω θα βρείτε απαντήσεις σε όσα μας ρωτήσατε.", m="0 0 4px") + ans)
     price = (_eyebrow(f"Πρόγραμμα {q.plan} · {q.trip_type}") + _h2("Η προσφορά σας")
              + _table([("Συνολικό ασφάλιστρο", f"<b>{E(q.price)}</b> για 2 άτομα"), ("Απαλλαγή", f"{E(q.excess)} ανά αίτημα"),
                        ("Αριθμός προσφοράς", f'<span style="font-family:{MONO}">{E(q.quote_no)}</span>' + (" (δοκιμαστικός)" if q.demo else "")),
@@ -194,7 +203,7 @@ def render_html(q: TravelQuote, embed_fonts: bool = False) -> str:
              + '<div style="height:10px"></div>'
              + _table([("Αριθμός προσφοράς", E(q.quote_no))] + ([("Ημερομηνία γέννησης για την ανάκτηση", E(q.retrieve_dob))] if q.retrieve_dob else [])))
     steps = [("Ανοίξτε την προσφορά", f"Μπείτε στον σύνδεσμο ανάκτησης προσφοράς και πληκτρολογήστε τον αριθμό {E(q.quote_no)}"
-              + (f". Για τη δοκιμαστική προσφορά χρησιμοποιήστε την ημερομηνία γέννησης {E(q.retrieve_dob)}" if q.retrieve_dob else "") + ". Πατήστε «Purchase»."),
+              + (f". Ως ημερομηνία γέννησης χρησιμοποιήστε {E(q.retrieve_dob)} (της Zenovia)" if q.retrieve_dob else "") + ". Πατήστε «Purchase»."),
              ("Ελέγξτε την προσφορά", "Βεβαιωθείτε ότι ο προορισμός, η διάρκεια, ο αριθμός των ασφαλιζομένων, το επίπεδο προγράμματος και το συνολικό κόστος ταιριάζουν με την παρούσα προσφορά."),
              ("Επιβεβαιώστε τις δηλώσεις", "Τσεκάρετε τα πεδία των δηλώσεων μόνο αφού διαβάσετε και αποδεχθείτε τις διατυπώσεις. Αν κάποιος ταξιδιώτης έχει πρόβλημα υγείας "
               "ή δεν είναι βέβαιος για την ιατρική δήλωση, πρέπει να ελέγξει το ασφαλιστήριο πριν συνεχίσει."),
@@ -218,7 +227,7 @@ def render_html(q: TravelQuote, embed_fonts: bool = False) -> str:
             f'Ashlar Assurance · Κομνηνών 3, Αθήνα 15342 · {_a("ashlarassurance.com", "https://ashlarassurance.com")}<br>'
             "Η προσφορά βασίζεται στα έγγραφα της ασφαλιστικής εταιρίας. Το ασφαλιστήριο συμβόλαιο είναι η τελική πηγή, και η ασφαλιστική εταιρία "
             "επιβεβαιώνει τους τελικούς όρους και το ασφάλιστρο.</div>")
-    body = (head + _block(hero, PAPER, "30px 28px") + _block(price) + _block(benefits) + _block(pre) + _block(med)
+    body = (head + _block(hero, PAPER, "30px 28px") + (_block(personal) if personal else "") + _block(price) + _block(benefits) + _block(pre) + _block(med)
             + _block(links) + _block(guide + cta) + foot)
     fonts = f"<style>{embedded_fonts_css()}</style>" if embed_fonts else f'<link href="{GF}" rel="stylesheet">'
     return (f'<!doctype html><html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -230,3 +239,35 @@ def render_html(q: TravelQuote, embed_fonts: bool = False) -> str:
 def render_pdf(html: str, out_path) -> Path:
     from core.lead_email import render_pdf as _pdf
     return _pdf(html, out_path)
+
+
+from dataclasses import replace as _replace
+
+ZENOVIA = _replace(
+    ARUBA_DEMO, demo=False, quote_no="165318", addressee="κυρία Γουμένου", prepared_for="Προσφορά για την κυρία Ζηνοβία Γουμένου",
+    dates="Ταξίδι 6 ημερών. Οι ακριβείς ημερομηνίες επιβεβαιώνονται πριν από την αγορά (βλ. απαντήσεις παρακάτω)",
+    replies=[
+        ("Διάρκεια της ασφάλισης",
+         "Σας προτείνουμε η κάλυψη να ξεκινά από την ημέρα που φεύγετε από την Ελλάδα, στις 12 Νοεμβρίου, και να διαρκεί μέχρι την επιστροφή σας, "
+         "ώστε να περιλαμβάνει και τις ενδιάμεσες στάσεις και όχι μόνο τις ημέρες στην Αρούμπα. Η προσφορά είναι για 6 ημέρες, "
+         "που αντιστοιχεί στο διάστημα 12 έως 17 Νοεμβρίου. Αν η επιστροφή σας στην Ελλάδα ολοκληρώνεται μετά τις 17 Νοεμβρίου, "
+         "πείτε μας την ημερομηνία άφιξης και θα ζητήσουμε νέα προσφορά για τις σωστές ημέρες, επειδή το ασφάλιστρο αλλάζει με τη διάρκεια. "
+         "Τον ακριβή ορισμό της έναρξης και της λήξης της κάλυψης τον δίνει το ασφαλιστήριο, και θα τον ελέγξουμε μαζί πριν από την αγορά."),
+        ("Ενδιάμεσες στάσεις σε Γαλλία και Νέα Υόρκη",
+         "Η προσφορά έχει εκδοθεί με προορισμό την Αρούμπα. Θα επιβεβαιώσουμε γραπτά με την ασφαλιστική ότι οι στάσεις σε Γαλλία και Νέα Υόρκη "
+         "καλύπτονται ως μέρος του ίδιου ταξιδιού, και θα σας ενημερώσουμε πριν πληρώσετε."),
+        ("Το quote δεν ανοίγει",
+         f"Μπείτε στον σύνδεσμο «Ανάκτηση προσφοράς» παρακάτω, πληκτρολογήστε τον αριθμό 165318 και ως ημερομηνία γέννησης 14/12/1990. "
+         "Αν δεν ανοίγει ούτε έτσι, γράψτε μας και θα σας στείλουμε τα στοιχεία της προσφοράς με άλλον τρόπο."),
+        ("Πληρωμή",
+         "Η πληρωμή γίνεται ηλεκτρονικά με κάρτα, μέσα από την προσφορά (βήμα VI του οδηγού παρακάτω), και ενδέχεται να ζητηθεί έλεγχος ταυτότητας από την τράπεζά σας. "
+         "Δεν χρειάζεται να μας στείλετε αποδεικτικό πληρωμής για την έκδοση: τα έγγραφα του ασφαλιστηρίου αποστέλλονται ηλεκτρονικά στο email που θα δηλώσετε."),
+        ("Προθεσμία και παραλαβή του ασφαλιστηρίου",
+         "Η αγορά πρέπει να ολοκληρωθεί πριν από την αναχώρησή σας, στις 12 Νοεμβρίου. Το ασφαλιστήριο αποστέλλεται με email μετά την πληρωμή. "
+         "Σας συνιστούμε να ολοκληρώσετε την αγορά νωρίτερα από την τελευταία εβδομάδα, ώστε να προλάβετε να ελέγξετε τα έγγραφα και, αν χρειαστεί, να τα διορθώσουμε."),
+        ("Απαιτήσεις της Αρούμπα",
+         "Η Αρούμπα ζητά ιατρική ασφάλιση με κάλυψη ιατρικών εξόδων τουλάχιστον 15.000 δολαρίων ΗΠΑ, που να περιλαμβάνει νοσοκομειακή περίθαλψη, "
+         "επείγουσα ιατρική φροντίδα και επαναπατρισμό, ακόμη και σε περίπτωση θανάτου. Το πρόγραμμα Platinum προβλέπει για έκτακτα ιατρικά έξοδα και επαναπατρισμό "
+         "όριο €10.000.000 ανά άτομο, πολύ πάνω από το ελάχιστο. Για τον επαναπατρισμό σε περίπτωση θανάτου θα ελέγξουμε τη σχετική διατύπωση του ασφαλιστηρίου και θα σας την επιβεβαιώσουμε γραπτά πριν από την αγορά."),
+    ],
+)

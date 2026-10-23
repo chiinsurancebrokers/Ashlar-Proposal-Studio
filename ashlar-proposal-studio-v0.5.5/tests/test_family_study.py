@@ -132,3 +132,11 @@ def test_benefit_grid_states_the_quoted_limits():
     html = render_family_study(outcome, people, lang="el")
     grid = html.split("Τι καλύπτει κάθε πρόγραμμα")[1].split("Σύγκριση επιλογών")[0]
     assert "Έως €1.000.000" in grid
+
+
+def test_grid_shows_a_dash_not_unknown_when_the_person_has_no_need():
+    outcome, people = _outcome()      # Katja has a dental need, Daughter does not
+    html = render_family_study(outcome, people, lang="en")
+    grid = html.split("What each plan covers")[1]
+    row = [r for r in grid.split("<tr>") if "Dental" in r][0]
+    assert "—" in row

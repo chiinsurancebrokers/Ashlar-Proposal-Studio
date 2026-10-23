@@ -227,7 +227,9 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
             state = offer.benefits.get(key, UNKNOWN)
             need = next((n for n in prof[person].needs if n.benefit == key), None)
             label = s[_STATE_KEY[state]]
-            if state == UNKNOWN:
+            if state == UNKNOWN and need is None:
+                cells.append('<span class="dim">—</span>')      # this person does not need it: neutral dash
+            elif state == UNKNOWN:
                 cells.append(f'<span class="dim">{e(label)}</span>')
             else:
                 text = f"<b>{e(label)}</b>"

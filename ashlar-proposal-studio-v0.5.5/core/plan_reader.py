@@ -180,6 +180,7 @@ _RULES = """You read insurance documents for a broker. Rules:
 - "en" is the cover as the document words it, in English: keep "up to", "limit", "not covered", "N/A" exactly where the document says so. "el" is the same in plain Greek.
 - Waiting periods: one row per condition, period as the document words it ("3 months", "first insurance year", "30 days"), in English and Greek.
 - If two documents disagree, report the one that is the policy wording and add a flag.
+- "provider" is the brand name only, such as "Generali" or "IMG", not the legal company name.
 - The yearly limit is the annual overall or hospital limit, not a sub-limit.
 """
 

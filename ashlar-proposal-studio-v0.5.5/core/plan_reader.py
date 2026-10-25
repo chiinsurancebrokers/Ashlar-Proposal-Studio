@@ -185,9 +185,26 @@ _RULES = """You read insurance documents for a broker. Rules:
 """
 
 
+# Broker rules, applied whenever a quote offers a choice. VUMI is always read at EUR 0 deductible.
+CHOICE_RULES = {"vumi": "If the quote offers several deductible (excess) options, report the option with a deductible of EUR 0 and its premium."}
+_WORDING = re.compile(r"wording|policy|terms|conditions|ασφαλιστ[ηή]ριο|οροι|όροι|\btob\b|table of benefits", re.I)
+
+
+def is_wording(name: str) -> bool:
+    return bool(_WORDING.search(name))
+
+
+def ordered(docs: Mapping[str, str]) -> dict[str, str]:
+    """Policy wording and tables of benefits first: they prevail over a quote."""
+    names = sorted(docs, key=lambda n: (not is_wording(n), n))
+    return {n: docs[n] for n in names}
+
+
 def build_prompt(docs: Mapping[str, str]) -> str:
+    docs = ordered(docs)
+    rules = "".join(f"- {r}\n" for k, r in CHOICE_RULES.items() if any(k in (n + t[:3000]).lower() for n, t in docs.items()))
     body = "\n\n".join(f"=== DOCUMENT: {name} ===\n{text}" for name, text in docs.items())
-    return f"{_RULES}\n{_SCHEMA}\n{body}"
+    return f"{_RULES}{rules}- The policy wording and table of benefits prevail over a quote or offer; read them in full.\n\n{_SCHEMA}\n{body}"
 
 
 # ---------------------------------------------------------------- reading
@@ -276,6 +293,8 @@ def read_plan(docs: Mapping[str, str], *, client=None, model: str | None = None)
     if not docs:
         return None, "No document text to read. Attach the quote or the table of benefits first."
     model = model or _model_name()
+    note = [] if any(is_wording(n) for n in docs) else [
+        "No policy wording or table of benefits was attached, so exclusions, limits and waiting periods are not confirmed. Attach it and read again."]
     try:
         if client is None:
             import anthropic
@@ -286,7 +305,8 @@ def read_plan(docs: Mapping[str, str], *, client=None, model: str | None = None)
         raw = parse_first_json_object(raw_text)
     except Exception as exc:  # noqa: BLE001 - the reason is shown to the broker
         return None, explain_model_error(exc, model=model, subject="The plan reading")
-    return verify(raw, docs), ""
+    reading = verify(raw, docs)
+    return replace(reading, flags=tuple(note) + reading.flags), ""
 
 
 # ---------------------------------------------------------------- hand-off to the study

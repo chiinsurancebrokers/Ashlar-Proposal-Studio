@@ -134,3 +134,18 @@ def test_read_plan_reports_model_failure_and_empty_input():
 def test_garbage_reply_is_reported_not_raised():
     r, why = pr.read_plan(DOCS, client=_Client("no json at all"))
     assert r is None and why
+
+
+def test_wording_is_read_first_and_vumi_rule_applies():
+    docs = {"quote.pdf": "VUMI quote text", "Policy wording.pdf": "wording text"}
+    assert list(pr.ordered(docs)) == ["Policy wording.pdf", "quote.pdf"]
+    prompt = pr.build_prompt(docs)
+    assert "deductible of EUR 0" in prompt and prompt.index("wording text") < prompt.index("VUMI quote text")
+    assert "deductible of EUR 0" not in pr.build_prompt({"a.pdf": "Generali"})
+
+
+def test_missing_wording_is_flagged():
+    r, _ = pr.read_plan({"quote.pdf": DOCS["quote.pdf"]}, client=_Client(json.dumps(good())))
+    assert any("No policy wording" in f for f in r.flags)
+    r2, _ = pr.read_plan({"Policy wording.pdf": DOCS["quote.pdf"]}, client=_Client(json.dumps(good())))
+    assert not any("No policy wording" in f for f in r2.flags)

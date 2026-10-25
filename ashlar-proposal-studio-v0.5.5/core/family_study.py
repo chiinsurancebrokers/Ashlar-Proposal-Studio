@@ -299,7 +299,8 @@ def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str) -> li
 def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: str = "en",
                         client_name: str = "", on: date | None = None, top: int = 6,
                         riders: dict | None = None, extra_points: Sequence[str] = (),
-                        quality: dict | None = None, baseline: tuple | None = None) -> str:
+                        quality: dict | None = None, baseline: tuple | None = None,
+                        extra_sections: Sequence[tuple[str, str]] = ()) -> str:
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -409,7 +410,7 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     who = f"<b>{e(client_name)}</b> | " if client_name else ""
 
     compare_html = _compare_section(outcome, prof, lang, s, top)
-    others_no = 3 + (1 if waiting_html else 0) + (1 if merit_ranked else 0)   # position of the comparison section
+    others_no = 3 + len(extra_sections) + (1 if waiting_html else 0) + (1 if merit_ranked else 0)   # position of the comparison section
     blind_note = f'<p class="note">{e(_BASE[lang]["blind"].format(n=others_no))}</p>' if baseline else ""
     sections = [
         (s["title"], f"<p>{e(s['prepared'])} {who}{e(today)}</p><p>{e(s['intro'])}</p>"
@@ -419,6 +420,7 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
                      f"<h2>{e(s['why'])}</h2>{_reasons_html(best, prof, lang)}"),
         (s["benefits"], benefits + compare_html),
     ]
+    sections.extend(extra_sections)      # broker-written sections, e.g. the extra cover of one insurer
     if waiting_html:
         sections.append((s["waiting"], waiting_html))
     if merit_ranked:

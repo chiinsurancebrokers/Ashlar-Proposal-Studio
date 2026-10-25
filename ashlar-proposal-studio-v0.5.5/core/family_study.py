@@ -112,7 +112,7 @@ _MERIT = {
         "intro": "This ranking looks only at what each plan gives: the annual limit, the participation you pay, the waiting periods, where you are covered and how wide the hospital network is. Price is not part of it. A plan can be the best on cover and still not be the one that fits your budget.",
         "dims": {"limit": "Annual limit", "deductible": "Participation", "waiting": "Waiting periods",
                  "area": "Area covered", "network": "Hospital network", "exclusions": "Exclusions"},
-        "scored": "Scored on: {dims}. Each counts equally. Limit, participation, waiting periods and area come from the offers and the policy wordings. Hospital network is the broker's rating.",
+        "scored": "Scored on: {dims}. Each counts equally. Limit, participation, waiting periods and area come from the offers and the policy wordings.",
         "left_out": "Not scored, because not rated for every plan: {dims}.",
         "col_combo": "Combination", "legend_title": "Marks",
     },
@@ -125,7 +125,7 @@ _MERIT = {
         "intro": "Η κατάταξη αυτή εξετάζει μόνο όσα προσφέρει κάθε πρόγραμμα: το ετήσιο όριο, τη συμμετοχή που πληρώνετε, τις περιόδους αναμονής, την περιοχή κάλυψης και το πλήθος των νοσοκομείων του δικτύου. Η τιμή δεν συμμετέχει. Ένα πρόγραμμα μπορεί να είναι το καλύτερο σε παροχές και να μην είναι αυτό που ταιριάζει στον προϋπολογισμό σας.",
         "dims": {"limit": "Ετήσιο όριο", "deductible": "Συμμετοχή", "waiting": "Αναμονές",
                  "area": "Περιοχή κάλυψης", "network": "Δίκτυο νοσοκομείων", "exclusions": "Εξαιρέσεις"},
-        "scored": "Βαθμολογήθηκαν: {dims}. Κάθε κριτήριο μετράει εξίσου. Όριο, συμμετοχή, αναμονές και περιοχή προέρχονται από τις προσφορές και τα ασφαλιστήρια. Το δίκτυο νοσοκομείων είναι εκτίμηση του συμβούλου.",
+        "scored": "Βαθμολογήθηκαν: {dims}. Κάθε κριτήριο μετράει εξίσου. Όριο, συμμετοχή, αναμονές και περιοχή προέρχονται από τις προσφορές και τα ασφαλιστήρια.",
         "left_out": "Δεν βαθμολογήθηκαν, γιατί δεν έχουν αξιολογηθεί για όλα τα προγράμματα: {dims}.",
         "col_combo": "Συνδυασμός", "legend_title": "Σήμανση",
     },
@@ -170,11 +170,29 @@ def _merit_html(outcome: Result, prof: dict, quality, lang: str, ranked, dims, b
     out = (f"<p>{e(m['intro'])}</p><p><b>{e(m['best_merit'].format(name=_combo_label(best, prof) if best else top_plan))}</b></p>"
            f"<p>{e(m['best_budget'].format(name=budget_plan))}" + (f" {e(m['same'])}" if same else "") + "</p>" + table)
     used = ", ".join(m["dims"][d] for d in dims)
-    out += f'<p class="note">{e(m["scored"].format(dims=used))}</p>'
+    rating = {"en": " Hospital network and exclusions are the broker's rating.", "el": " Το δίκτυο νοσοκομείων και οι εξαιρέσεις είναι εκτίμηση του συμβούλου."}[lang] \
+        if {"network", "exclusions"} & set(dims) else ""
+    out += f'<p class="note">{e(m["scored"].format(dims=used) + rating)}</p>'
     left = [d for d in plan_quality.DIMENSIONS if d not in dims]
     if left:
         out += f'<p class="note">{e(m["left_out"].format(dims=", ".join(m["dims"][d] for d in left)))}</p>'
     return out
+
+
+_BASE = {
+    "en": {"col": "Against today's plan", "line": "Today's plan: {name}, {price} a year.", "same": "today's plan",
+           "less": "{x} less", "more": "{x} more"},
+    "el": {"col": "Διαφορά από το σημερινό", "line": "Σημερινό πρόγραμμα: {name}, {price} τον χρόνο.", "same": "το σημερινό πρόγραμμα",
+           "less": "{x} λιγότερο", "more": "{x} περισσότερο"},
+}
+
+
+def _vs_baseline(total: Decimal, baseline, lang: str, s: dict) -> str:
+    b = _BASE[lang]
+    diff = (total - baseline[1]).quantize(Decimal("0.01"))
+    if diff == 0:
+        return b["same"]
+    return (b["less"] if diff < 0 else b["more"]).format(x=_money(abs(diff), s))
 
 
 def _money(value: Decimal | float, s: dict) -> str:
@@ -267,7 +285,7 @@ def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str) -> li
 def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: str = "en",
                         client_name: str = "", on: date | None = None, top: int = 6,
                         riders: dict | None = None, extra_points: Sequence[str] = (),
-                        quality: dict | None = None) -> str:
+                        quality: dict | None = None, baseline: tuple | None = None) -> str:
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -333,7 +351,13 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
 
     other_rows = [[e(_combo_label(x, prof)) + (_tags(x) if quality else ""), _money(x.total, s), _fit(x.fit, s)]
                   for x in outcome.ranked[:top]]
-    others = _table([s["combo"], s["cost"], s["fit"]], other_rows, numeric=(1, 2))
+    if baseline:
+        for row, x in zip(other_rows, outcome.ranked[:top]):
+            row.append(_vs_baseline(x.total, baseline, lang, s))
+        others = _table([s["combo"], s["cost"], s["fit"], _BASE[lang]["col"]], other_rows, numeric=(1, 2))
+        others = f'<p>{e(_BASE[lang]["line"].format(name=baseline[0], price=_money(baseline[1], s)))}</p>' + others
+    else:
+        others = _table([s["combo"], s["cost"], s["fit"]], other_rows, numeric=(1, 2))
 
     conf = confirmations(outcome, profiles, lang) + list(extra_points)
     conf_html = ("<ul>" + "".join(f"<li>{e(c)}</li>" for c in conf) + "</ul>") if conf else f"<p>{e(s['none_confirm'])}</p>"

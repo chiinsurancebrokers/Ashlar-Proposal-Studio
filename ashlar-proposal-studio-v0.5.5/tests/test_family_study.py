@@ -172,3 +172,13 @@ def test_every_waiting_period_text_is_readable():
     from core import plan_quality as pq, waiting_periods as wp
     for key in (wp.HOSPITAL, wp.DOCTORS, wp.STANDARD, wp.ETHNIKI, wp.VUMI):
         assert pq.waiting_months([key]) > 0
+
+
+def test_vs_baseline_wording():
+    from decimal import Decimal
+    from core.family_study import _vs_baseline, _STRINGS
+    s = _STRINGS["el"]
+    base = ("σημερινό", Decimal("1656.36"))
+    assert _vs_baseline(Decimal("1507.15"), base, "el", s) == "€149,21 λιγότερο"
+    assert _vs_baseline(Decimal("2179.25"), base, "el", s) == "€522,89 περισσότερο"
+    assert _vs_baseline(Decimal("1656.36"), base, "el", s) == "το σημερινό πρόγραμμα"

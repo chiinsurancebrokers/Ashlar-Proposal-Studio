@@ -5,7 +5,7 @@ plan it applies to. Nothing here is a price or an estimate.
 """
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 HOSPITAL = "hospital_premium_flexi"
 DOCTORS = "doctors_exams_premium"
@@ -137,3 +137,15 @@ def tables_for(label: str, riders: Iterable[str] = ()) -> list[str]:
 def rows(key: str, lang: str) -> Sequence[tuple[str, str]]:
     i = 1 if lang == "el" else 0
     return [(r[i], r[i + 2]) for r in TABLES[key]["rows"]]
+
+
+def register_table(key: str, title: Mapping[str, str], intro: Mapping[str, str], rows: Iterable[Sequence[str]]) -> str:
+    """Add a waiting-period table at run time, for a plan the code does not know yet.
+
+    Rows are ``(en_condition, el_condition, en_period, el_period)``. The key is returned. An existing
+    built-in table is never replaced, so a reader cannot overwrite a table a broker already checked.
+    """
+    if key in TABLES and not key.startswith("read_"):
+        raise ValueError(f"{key} is a built-in table and cannot be replaced.")
+    TABLES[key] = {"title": dict(title), "intro": dict(intro), "rows": [tuple(r) for r in rows]}
+    return key

@@ -289,7 +289,9 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
-    s = _STRINGS[lang]
+    s = dict(_STRINGS[lang])
+    if len(profiles) == 1:       # one person: the page is not about a family
+        s["title"] = {"en": "Health cover for you", "el": "Ασφάλιση υγείας για εσάς"}[lang]
     best: Selection = outcome.winner
     prof = {p.person: p for p in profiles}
     e = escape

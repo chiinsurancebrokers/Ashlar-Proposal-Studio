@@ -181,9 +181,17 @@ def _merit_html(outcome: Result, prof: dict, quality, lang: str, ranked, dims, b
 
 _BASE = {
     "en": {"col": "Against today's plan", "line": "Today's plan: {name}, {price} a year.", "same": "today's plan",
-           "less": "{x} less", "more": "{x} more"},
+           "less": "{x} less", "more": "{x} more",
+           "worst_col": "Year with a large claim", "worst_none": "—",
+           "worst_line": "A year with a large hospital claim costs the premium plus the full excess. On that measure the lowest is {name}, at {price}.",
+           "worst_note": "Year with a large claim = yearly premium plus the full excess the insured pays first.",
+           "blind": "This choice is based on the premium. It does not weigh the size of the excess. Section {n} shows what a year with a large hospital claim costs under each plan."},
     "el": {"col": "Διαφορά από το σημερινό", "line": "Σημερινό πρόγραμμα: {name}, {price} τον χρόνο.", "same": "το σημερινό πρόγραμμα",
-           "less": "{x} λιγότερο", "more": "{x} περισσότερο"},
+           "less": "{x} λιγότερο", "more": "{x} περισσότερο",
+           "worst_col": "Έτος με μεγάλη νοσηλεία", "worst_none": "—",
+           "worst_line": "Ένα έτος με μεγάλη νοσηλεία κοστίζει το ασφάλιστρο συν ολόκληρη την απαλλαγή. Με αυτό το μέτρο το χαμηλότερο είναι {name}, με {price}.",
+           "worst_note": "Έτος με μεγάλη νοσηλεία = ετήσιο ασφάλιστρο συν ολόκληρη την απαλλαγή που πληρώνει πρώτα ο ασφαλισμένος.",
+           "blind": "Η επιλογή αυτή βασίζεται στο ασφάλιστρο. Δεν σταθμίζει το ύψος της απαλλαγής. Στην ενότητα {n} φαίνεται τι κοστίζει ένα έτος με μεγάλη νοσηλεία σε κάθε πρόγραμμα."},
 }
 
 
@@ -354,10 +362,23 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     other_rows = [[e(_combo_label(x, prof)) + (_tags(x) if quality else ""), _money(x.total, s), _fit(x.fit, s)]
                   for x in outcome.ranked[:top]]
     if baseline:
+        b = _BASE[lang]
+        worst: list[tuple[Decimal, Selection]] = []
         for row, x in zip(other_rows, outcome.ranked[:top]):
             row.append(_vs_baseline(x.total, baseline, lang, s))
-        others = _table([s["combo"], s["cost"], s["fit"], _BASE[lang]["col"]], other_rows, numeric=(1, 2))
-        others = f'<p>{e(_BASE[lang]["line"].format(name=baseline[0], price=_money(baseline[1], s)))}</p>' + others
+            exc = [(quality or {}).get(o.plan_key) for o in x.offers]
+            if exc and all(q is not None and q.deductible is not None for q in exc):
+                w = x.total + sum(Decimal(str(q.deductible)) for q in exc)
+                worst.append((w, x))
+                row.append(_money(w, s))
+            else:
+                row.append(b["worst_none"])
+        others = _table([s["combo"], s["cost"], s["fit"], b["col"], b["worst_col"]], other_rows, numeric=(1, 2, 4))
+        others = f'<p>{e(b["line"].format(name=baseline[0], price=_money(baseline[1], s)))}</p>' + others
+        if worst:
+            w, x = min(worst, key=lambda t: t[0])
+            others += (f'<p><b>{e(b["worst_line"].format(name=_combo_label(x, prof), price=_money(w, s)))}</b></p>'
+                       f'<p class="note">{e(b["worst_note"])}</p>')
     else:
         others = _table([s["combo"], s["cost"], s["fit"]], other_rows, numeric=(1, 2))
 
@@ -378,10 +399,13 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     who = f"<b>{e(client_name)}</b> | " if client_name else ""
 
     compare_html = _compare_section(outcome, prof, lang, s, top)
+    others_no = 3 + (1 if waiting_html else 0) + (1 if merit_ranked else 0)   # position of the comparison section
+    blind_note = f'<p class="note">{e(_BASE[lang]["blind"].format(n=others_no))}</p>' if baseline else ""
     sections = [
         (s["title"], f"<p>{e(s['prepared'])} {who}{e(today)}</p><p>{e(s['intro'])}</p>"
                      f"<h2>{e(s['people'])}</h2>{covers}<h2>{e(s['chosen'])}</h2>{costs}"
                      f"<p>{_money(best.total, s)} {e(s['per_year'])}, {_money(best.total / 12, s)} {e(s['per_month'])}.</p>"
+                     f"{blind_note}"
                      f"<h2>{e(s['why'])}</h2>{_reasons_html(best, prof, lang)}"),
         (s["benefits"], benefits + compare_html),
     ]

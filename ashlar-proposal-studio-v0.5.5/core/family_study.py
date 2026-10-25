@@ -104,8 +104,8 @@ footer{padding-block:24px;color:var(--muted);font-size:12px}
 
 _MERIT = {
     "en": {
-        "title": "Best plan on cover quality", "tag_merit": "Our recommendation: best on cover",
-        "tag_budget": "Best for your budget", "plan": "Plan", "score": "Cover score",
+        "title": "Best plan on cover quality", "tag_merit": "Our recommendation: strongest cover, whatever it costs",
+        "tag_budget": "Best balance of cover and premium", "plan": "Plan", "score": "Cover score",
         "best_merit": "On cover alone, whatever it costs, the strongest plan is {name}.",
         "best_budget": "For the budget and needs you stated, the best fit is {name}.",
         "same": "These are the same plan.",
@@ -117,8 +117,8 @@ _MERIT = {
         "col_combo": "Combination", "legend_title": "Marks",
     },
     "el": {
-        "title": "Το καλύτερο πρόγραμμα βάσει παροχών", "tag_merit": "Η σύστασή μας: καλύτερο βάσει παροχών",
-        "tag_budget": "Καλύτερο για τον προϋπολογισμό σας", "plan": "Πρόγραμμα", "score": "Βαθμός παροχών",
+        "title": "Το καλύτερο πρόγραμμα βάσει παροχών", "tag_merit": "Η σύστασή μας: οι καλύτερες παροχές, ανεξάρτητα από το κόστος",
+        "tag_budget": "Καλύτερη σχέση κάλυψης και ασφαλίστρου", "plan": "Πρόγραμμα", "score": "Βαθμός παροχών",
         "best_merit": "Με βάση μόνο τις παροχές, ανεξάρτητα από το κόστος, το ισχυρότερο πρόγραμμα είναι {name}.",
         "best_budget": "Για τον προϋπολογισμό και τις ανάγκες που δηλώσατε, η καλύτερη επιλογή είναι {name}.",
         "same": "Πρόκειται για το ίδιο πρόγραμμα.",
@@ -180,15 +180,21 @@ def _merit_html(outcome: Result, prof: dict, quality, lang: str, ranked, dims, b
 
 
 _BASE = {
-    "en": {"col": "Against today's plan", "line": "Today's plan: {name}, {price} a year.", "same": "today's plan",
+    "en": {"h_plan": "Plan", "h_premium": "Yearly premium", "h_fit": "How well it covers your needs (0 to 1)",
+           "h_excess": "Excess you pay first, each year", "title": "Comparison with your current plan",
+           "sorted": "Sorted by how well each plan covers your needs after adjusting for the premium (1 means every need fully covered, 0 means none). The order does not take the excess into account.",
+           "col": "Premium difference from today's plan, per year", "line": "Today's plan: {name}, {price} a year.", "same": "today's plan",
            "less": "{x} less", "more": "{x} more",
-           "worst_col": "Year with a large claim", "worst_none": "—",
+           "worst_col": "Total yearly cost in a year with a large hospital stay (premium + excess)", "worst_none": "—",
            "worst_line": "A year with a large hospital claim costs the premium plus the full excess. On that measure the lowest is {name}, at {price}.",
            "worst_note": "Year with a large claim = yearly premium plus the full excess the insured pays first.",
            "blind": "This choice is based on the premium. It does not weigh the size of the excess. Section {n} shows what a year with a large hospital claim costs under each plan."},
-    "el": {"col": "Διαφορά από το σημερινό", "line": "Σημερινό πρόγραμμα: {name}, {price} τον χρόνο.", "same": "το σημερινό πρόγραμμα",
+    "el": {"h_plan": "Πρόγραμμα", "h_premium": "Ετήσιο ασφάλιστρο", "h_fit": "Πόσο καλύπτει τις ανάγκες σας (0 έως 1)",
+           "h_excess": "Απαλλαγή: ποσό που πληρώνετε πρώτα εσείς, ανά έτος", "title": "Σύγκριση με το σημερινό σας πρόγραμμα",
+           "sorted": "Η σειρά βασίζεται στο πόσο καλά καλύπτει κάθε πρόγραμμα τις ανάγκες σας, μετά από διόρθωση για το ασφάλιστρο (το 1 σημαίνει ότι καλύπτονται πλήρως όλες οι ανάγκες, το 0 ότι δεν καλύπτεται καμία). Η σειρά δεν λαμβάνει υπόψη την απαλλαγή.",
+           "col": "Διαφορά ασφαλίστρου από το σημερινό πρόγραμμα, ανά έτος", "line": "Σημερινό πρόγραμμα: {name}, {price} τον χρόνο.", "same": "το σημερινό πρόγραμμα",
            "less": "{x} λιγότερο", "more": "{x} περισσότερο",
-           "worst_col": "Έτος με μεγάλη νοσηλεία", "worst_none": "—",
+           "worst_col": "Συνολικό κόστος σε έτος με μεγάλη νοσηλεία (ασφάλιστρο + απαλλαγή)", "worst_none": "—",
            "worst_line": "Ένα έτος με μεγάλη νοσηλεία κοστίζει το ασφάλιστρο συν ολόκληρη την απαλλαγή. Με αυτό το μέτρο το χαμηλότερο είναι {name}, με {price}.",
            "worst_note": "Έτος με μεγάλη νοσηλεία = ετήσιο ασφάλιστρο συν ολόκληρη την απαλλαγή που πληρώνει πρώτα ο ασφαλισμένος.",
            "blind": "Η επιλογή αυτή βασίζεται στο ασφάλιστρο. Δεν σταθμίζει το ύψος της απαλλαγής. Στην ενότητα {n} φαίνεται τι κοστίζει ένα έτος με μεγάλη νοσηλεία σε κάθε πρόγραμμα."},
@@ -368,12 +374,16 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
             row.append(_vs_baseline(x.total, baseline, lang, s))
             exc = [(quality or {}).get(o.plan_key) for o in x.offers]
             if exc and all(q is not None and q.deductible is not None for q in exc):
-                w = x.total + sum(Decimal(str(q.deductible)) for q in exc)
+                d = sum(Decimal(str(q.deductible)) for q in exc)
+                w = x.total + d
                 worst.append((w, x))
+                row.append(_money(d, s))
                 row.append(_money(w, s))
             else:
                 row.append(b["worst_none"])
-        others = _table([s["combo"], s["cost"], s["fit"], b["col"], b["worst_col"]], other_rows, numeric=(1, 2, 4))
+                row.append(b["worst_none"])
+        others = _table([b["h_plan"], b["h_premium"], b["h_fit"], b["col"], b["h_excess"], b["worst_col"]], other_rows,
+                        numeric=(1, 2, 4, 5))
         others = f'<p>{e(b["line"].format(name=baseline[0], price=_money(baseline[1], s)))}</p>' + others
         if worst:
             w, x = min(worst, key=lambda t: t[0])
@@ -413,7 +423,8 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
         sections.append((s["waiting"], waiting_html))
     if merit_ranked:
         sections.append((mm["title"], _merit_html(outcome, prof, quality, lang, merit_ranked, merit_dims, merit_best)))
-    sections.append((s["all"], others + f'<p class="note">{e(s["sorted"])}</p>'))
+    sections.append((_BASE[lang]["title"] if baseline else s["all"],
+                     others + f'<p class="note">{e(_BASE[lang]["sorted"] if baseline else s["sorted"])}</p>'))
     sections.append((s["confirm"], conf_html + f'<p class="note">{e(s["fair1"])}</p><p class="note">{e(s["fair2"])}</p>'
                                               f'<p class="note">{e(s["fair3"])}</p>'))
     body = "".join(f'<section class="page"><div class="eyebrow">{e(s["eyebrow"])} / {i:02d}</div><h1>{e(h)}</h1>{b}</section>'

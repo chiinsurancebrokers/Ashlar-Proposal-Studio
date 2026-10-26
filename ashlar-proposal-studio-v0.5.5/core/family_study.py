@@ -242,7 +242,8 @@ def _fit(value: float, s: dict) -> str:
     return f"{value:.2f}".replace(".", s["dec"])
 
 
-def _compare_section(outcome: Result, prof: dict, lang: str, s: dict, top: int) -> str:
+def _compare_section(outcome: Result, prof: dict, lang: str, s: dict, top: int,
+                     limits: dict | None = None) -> str:
     """For each person with more than one option in play: the options side by side, with the
     quoted text beside each state so limits and participations can be compared."""
     e = escape
@@ -259,6 +260,15 @@ def _compare_section(outcome: Result, prof: dict, lang: str, s: dict, top: int) 
             continue
         p = prof[person]
         rows = [[e(s["cost"])] + [_money(o.yearly, s) for o in offers]]
+        if limits and any(o.plan_key in limits for o in offers):
+            cells = [e({"en": "Annual hospital limit", "el": "Ανώτατο ετήσιο όριο νοσηλείας"}[lang])]
+            for o in offers:
+                amount, note = limits.get(o.plan_key, (None, ""))
+                cell = f"<b>{_money(Decimal(str(amount)), s)[:-3]}</b>" if amount is not None else "—"
+                if note:
+                    cell += f'<br><span class="dim">{e(note)}</span>'
+                cells.append(cell)
+            rows.append(cells)
         for need in p.needs:
             cells = [e(_benefit(need.benefit, lang))]
             for o in offers:
@@ -300,7 +310,8 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
                         client_name: str = "", on: date | None = None, top: int = 6,
                         riders: dict | None = None, extra_points: Sequence[str] = (),
                         quality: dict | None = None, baseline: tuple | None = None,
-                        extra_sections: Sequence[tuple[str, str]] = ()) -> str:
+                        extra_sections: Sequence[tuple[str, str]] = (),
+                        limits: dict | None = None) -> str:
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -409,7 +420,7 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     today = _fmt_date(on or date.today(), lang)
     who = f"<b>{e(client_name)}</b> | " if client_name else ""
 
-    compare_html = _compare_section(outcome, prof, lang, s, top)
+    compare_html = _compare_section(outcome, prof, lang, s, top, limits)
     others_no = 3 + len(extra_sections) + (1 if waiting_html else 0) + (1 if merit_ranked else 0)   # position of the comparison section
     blind_note = f'<p class="note">{e(_BASE[lang]["blind"].format(n=others_no))}</p>' if baseline else ""
     sections = [

@@ -150,7 +150,7 @@ def _merit(outcome: Result, quality, lang: str):
     return ranked, dims, best, combo
 
 
-def _merit_html(outcome: Result, prof: dict, quality, lang: str, ranked, dims, best) -> str:
+def _merit_html(outcome: Result, prof: dict, quality, lang: str, ranked, dims, best, budget_line: bool = True) -> str:
     m = _MERIT[lang]
     e = escape
     labels = {o.plan_key: o.label for sel in outcome.ranked for o in sel.offers}
@@ -168,7 +168,8 @@ def _merit_html(outcome: Result, prof: dict, quality, lang: str, ranked, dims, b
     budget_plan = outcome.winner.label if len(outcome.winner.offers) == 1 else _combo_label(outcome.winner, prof)
     same = best is not None and best is outcome.winner
     out = (f"<p>{e(m['intro'])}</p><p><b>{e(m['best_merit'].format(name=_combo_label(best, prof) if best else top_plan))}</b></p>"
-           f"<p>{e(m['best_budget'].format(name=budget_plan))}" + (f" {e(m['same'])}" if same else "") + "</p>" + table)
+           + (f"<p>{e(m['best_budget'].format(name=budget_plan))}" + (f" {e(m['same'])}" if same else "") + "</p>"
+              if budget_line else "") + table)
     used = ", ".join(m["dims"][d] for d in dims)
     rating = {"en": " Hospital network and exclusions are the broker's rating.", "el": " Το δίκτυο νοσοκομείων και οι εξαιρέσεις είναι εκτίμηση του συμβούλου."}[lang] \
         if {"network", "exclusions"} & set(dims) else ""
@@ -312,7 +313,7 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
                         quality: dict | None = None, baseline: tuple | None = None,
                         extra_sections: Sequence[tuple[str, str]] = (),
                         limits: dict | None = None, broker_choice: tuple[str, str] | None = None,
-                        recommended: str | None = None) -> str:
+                        recommended: str | None = None, alternatives: tuple[str, str] | None = None) -> str:
     """The study as one HTML page. ``recommended`` is a plan name the broker chose to lead with. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -332,6 +333,11 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
             best = pick[0]
             s["chosen"] = {"en": "Our recommendation", "el": "Η πρότασή μας"}[lang]
             s["why"] = {"en": "Why this plan", "el": "Γιατί αυτό το πρόγραμμα"}[lang]
+            if alternatives and len(profiles) == 1:
+                s["intro"] = {
+                    "en": "We compared every plan we priced. First comes our recommendation and the reasons for it. After it come the alternatives, from the one that matches your needs most closely, with what each gives up compared with our recommendation.",
+                    "el": "Συγκρίναμε κάθε πρόγραμμα που τιμολογήθηκε. Πρώτα έρχεται η πρότασή μας και οι λόγοι της. Ακολουθούν οι εναλλακτικές, με σειρά από αυτή που ταιριάζει περισσότερο στις ανάγκες σας, και με όσα παραχωρεί η καθεμία σε σχέση με την πρότασή μας.",
+                }[lang]
     prof = {p.person: p for p in profiles}
     e = escape
 
@@ -448,13 +454,17 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
                      f"<h2>{e(s['why'])}</h2>{_reasons_html(best, prof, lang)}"),
         (s["benefits"], benefits + compare_html),
     ]
+    if recommended and alternatives:     # the recommendation first, then the alternatives, set apart
+        sections.insert(1, alternatives)
     sections.extend(extra_sections)      # broker-written sections, e.g. the extra cover of one insurer
     if waiting_html:
         sections.append((s["waiting"], waiting_html))
     if merit_ranked:
-        sections.append((mm["title"], _merit_html(outcome, prof, quality, lang, merit_ranked, merit_dims, merit_best)))
-    sections.append((_BASE[lang]["title"] if baseline else s["all"],
-                     others + f'<p class="note">{e(_BASE[lang]["sorted"] if baseline else s["sorted"])}</p>'))
+        sections.append((mm["title"], _merit_html(outcome, prof, quality, lang, merit_ranked, merit_dims, merit_best,
+                                                  budget_line=not (recommended and alternatives))))
+    if not (recommended and alternatives):
+        sections.append((_BASE[lang]["title"] if baseline else s["all"],
+                         others + f'<p class="note">{e(_BASE[lang]["sorted"] if baseline else s["sorted"])}</p>'))
     sections.append((s["confirm"], conf_html + f'<p class="note">{e(s["fair1"])}</p><p class="note">{e(s["fair2"])}</p>'
                                               f'<p class="note">{e(s["fair3"])}</p>'))
     body = "".join(f'<section class="page"><div class="eyebrow">{e(s["eyebrow"])} / {i:02d}</div><h1>{e(h)}</h1>{b}</section>'

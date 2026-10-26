@@ -78,7 +78,7 @@ _BENEFIT_EL = {
     "chronic_conditions": "Χρόνιες παθήσεις", "mental_health": "Ψυχική υγεία", "maternity": "Μητρότητα",
     "dental": "Οδοντιατρικά", "optical": "Οφθαλμολογικά",
     "diagnostics_imaging": "Διαγνωστικές εξετάσεις και απεικόνιση",
-    "preventive": "Πρόληψη και check-up", "evacuation_repatriation": "Διακομιδή και επαναπατρισμός",
+    "preventive": "Πρόληψη και check-up", "evacuation_repatriation": "Διακομιδή και επαναπατρισμός", "emergency": "Έκτακτα και επείγοντα περιστατικά",
 }
 _STATE_KEY = {COVERED: "covered", SUB_LIMIT: "sub_limit", ACTION: "action", NOT_COVERED: "not_covered",
               UNKNOWN: "unknown"}

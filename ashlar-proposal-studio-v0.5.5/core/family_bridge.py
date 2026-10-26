@@ -28,6 +28,7 @@ BENEFITS = {
     "diagnostics_imaging": "Diagnostics and imaging",
     "preventive": "Preventive care and check-ups",
     "evacuation_repatriation": "Evacuation and repatriation",
+    "emergency": "Emergency and urgent care",
 }
 WEIGHTS = {"Must have": MUST, "High": HIGH, "Medium": MEDIUM, "Low": LOW}
 BUDGETS = {"High": "high", "Normal": "normal", "Low": "low"}

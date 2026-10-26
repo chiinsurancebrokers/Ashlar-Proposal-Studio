@@ -164,7 +164,7 @@ def person_key(name: str) -> str:
 
 def run_family_mix(people_rows: Iterable[Mapping], need_rows: Iterable[Mapping], results: list[Mapping],
                    assignments: Mapping[int, Iterable[str]], *, residences: Mapping[int, Iterable[str]] | None = None,
-                   budget_cap=None):
+                   budget_cap=None, order: str = "fit"):
     """Everything the screen does on the button: profiles, offers, then the optimiser.
 
     ``need_rows`` may name a benefit by its label or its key. Returns ``(outcome, profiles, notes)``
@@ -178,4 +178,4 @@ def run_family_mix(people_rows: Iterable[Mapping], need_rows: Iterable[Mapping],
     offers, notes = offers_from_assignments(results, assignments, residences=residences)
     if not profiles or not offers:
         return None, profiles, warnings + notes
-    return optimise(profiles, offers, budget_cap=budget_cap), profiles, warnings + notes
+    return optimise(profiles, offers, budget_cap=budget_cap, order=order), profiles, warnings + notes

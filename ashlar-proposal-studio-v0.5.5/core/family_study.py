@@ -318,6 +318,12 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     s = dict(_STRINGS[lang])
     if len(profiles) == 1:       # one person: the page is not about a family
         s["title"] = {"en": "Health cover for you", "el": "Ασφάλιση υγείας για εσάς"}[lang]
+        s["intro"] = {
+            "en": "We compared every plan we priced and matched it to the needs you gave us. The plans are listed from the best match to the weakest. Price counts only when two plans match equally well. For each plan you can see what it covers and what it does not, so it is clear what each choice gives up.",
+            "el": "Συγκρίναμε κάθε πρόγραμμα που τιμολογήθηκε και το ταιριάξαμε με τις ανάγκες που δηλώσατε. Τα προγράμματα παρουσιάζονται με σειρά, από αυτό που ταιριάζει περισσότερο ως αυτό που ταιριάζει λιγότερο. Η τιμή μετρά μόνο όταν δύο προγράμματα ταιριάζουν εξίσου. Για κάθε πρόγραμμα βλέπετε τι καλύπτει και τι όχι, ώστε να είναι σαφές τι παραχωρεί κάθε επιλογή.",
+        }[lang]
+        s["chosen"] = {"en": "The plan that fits best", "el": "Το πρόγραμμα που ταιριάζει καλύτερα"}[lang]
+        s["why"] = {"en": "Why this plan", "el": "Γιατί αυτό το πρόγραμμα"}[lang]
     best: Selection = outcome.winner
     prof = {p.person: p for p in profiles}
     e = escape

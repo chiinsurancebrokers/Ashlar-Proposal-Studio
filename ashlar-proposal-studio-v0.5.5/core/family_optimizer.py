@@ -226,7 +226,7 @@ def _score(selection: tuple[Offer, ...], profiles: list[Profile], min_cost: Deci
 
 
 def _rank(profiles: list[Profile], offers: list[Offer], cap: Decimal | None,
-          resolved: Resolution | None) -> tuple[list[Selection], list[str]]:
+          resolved: Resolution | None, rank_by: str = "utility") -> tuple[list[Selection], list[str]]:
     usable = _eligible_offers(profiles, offers, resolved)
     by_person: dict[str, list[Offer]] = {}
     for o in usable:
@@ -244,7 +244,10 @@ def _rank(profiles: list[Profile], offers: list[Offer], cap: Decimal | None,
     min_cost = min(totals)
     k = sum(BUDGET[p.budget] for p in profiles) / len(profiles)
     scored = [_score(c, profiles, min_cost, k, cap, resolved) for c in combos]
-    scored.sort(key=lambda s: (s.over_budget, -s.utility, s.total, s.label))
+    if rank_by == "fit":      # best match to the needs first; price only breaks ties
+        scored.sort(key=lambda s: (s.over_budget, -s.fit, s.total, s.label))
+    else:
+        scored.sort(key=lambda s: (s.over_budget, -s.utility, s.total, s.label))
     return scored, []
 
 
@@ -269,10 +272,10 @@ def _unknown_keys(profiles: list[Profile], offers: list[Offer]) -> list[tuple[st
     return keys
 
 
-def optimise(profiles: list[Profile], offers: list[Offer], *, budget_cap=None) -> Result:
+def optimise(profiles: list[Profile], offers: list[Offer], *, budget_cap=None, order: str = "utility") -> Result:
     """Rank every way of covering the household and test how firm the winner is."""
     cap = _money(budget_cap) if budget_cap is not None else None
-    ranked, missing = _rank(profiles, offers, cap, None)
+    ranked, missing = _rank(profiles, offers, cap, None, order)
     if not ranked:
         return Result([], [], None, 0.0, [], True, 0, missing)
     winner = ranked[0]
@@ -285,7 +288,7 @@ def optimise(profiles: list[Profile], offers: list[Offer], *, budget_cap=None) -
     if keys and len(keys) <= MAX_UNKNOWNS:
         for values in product((0.0, 1.0), repeat=len(keys)):
             resolved = dict(zip(keys, values))
-            r, _ = _rank(profiles, offers, cap, resolved)
+            r, _ = _rank(profiles, offers, cap, resolved, order)
             tested += 1
             if r and r[0].label != winner.label:
                 robust = False
@@ -296,15 +299,15 @@ def optimise(profiles: list[Profile], offers: list[Offer], *, budget_cap=None) -
                         flips.append(Flip(plan_key, benefit, "covered", r[0].label))
     elif keys:
         robust = False  # too many unknowns to test; the broker confirms them first
-    return Result(ranked, _frontier(ranked), winner, margin, _decisive(flips, profiles, offers, cap, winner),
+    return Result(ranked, _frontier(ranked), winner, margin, _decisive(flips, profiles, offers, cap, winner, order),
                   robust, tested, [])
 
 
-def _decisive(flips: list[Flip], profiles, offers, cap, winner: Selection) -> list[Flip]:
+def _decisive(flips: list[Flip], profiles, offers, cap, winner: Selection, order: str = "utility") -> list[Flip]:
     """Keep only unknowns that flip the winner when resolved alone, with everything else unconfirmed."""
     decisive: list[Flip] = []
     for f in flips:
-        r, _ = _rank(profiles, offers, cap, {(f.plan_key, f.benefit): 1.0})
+        r, _ = _rank(profiles, offers, cap, {(f.plan_key, f.benefit): 1.0}, order)
         if r and r[0].label != winner.label:
             decisive.append(Flip(f.plan_key, f.benefit, "covered", r[0].label))
     return decisive

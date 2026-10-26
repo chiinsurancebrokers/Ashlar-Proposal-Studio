@@ -146,3 +146,15 @@ def test_winner_scenario_feeds_the_broker_checks():
     people = [Person("katja", "Katja", 55), Person("d1", "Daughter 1", 19), Person("d2", "Daughter 2", 18)]
     codes = {f.code for f in check_scenario(scenario, people, today=date(2026, 10, 21))}
     assert "age_not_shown" in codes
+
+
+def test_fit_order_puts_the_best_match_first_even_when_it_costs_more():
+    cheap = offer_from_quotes("cheap", [q("katja", "Cheap", "Basic", "100", "monthly")], residences={"Greece"},
+                              benefits={"inpatient": SUB_LIMIT, "outpatient": NOT_COVERED,
+                                        "diagnostics_imaging": NOT_COVERED, "preventive": COVERED})
+    full = offer_from_quotes("full", [q("katja", "Full", "Plus", "3000")], residences={"Greece"},
+                             benefits={"inpatient": COVERED, "outpatient": COVERED,
+                                       "diagnostics_imaging": COVERED, "preventive": COVERED})
+    by_fit = optimise([KATJA], [cheap, full], order="fit")
+    assert by_fit.ranked[0].fit >= by_fit.ranked[1].fit
+    assert by_fit.winner.offers[0].label.endswith("Plus")

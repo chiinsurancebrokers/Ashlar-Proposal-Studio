@@ -31,6 +31,7 @@ TABLES = {
             ("Deviated nasal septum", "Σκολίωση ρινικού διαφράγματος", "The first three (3) consecutive insurance years", "Τα τρία (3) πρώτα συνεχόμενα ασφαλιστικά έτη"),
             ("Spinal conditions", "Παθήσεις σπονδυλικής στήλης", "The first three (3) consecutive insurance years. The wait does not apply to an injury proven medically and by imaging", "Τα τρία (3) πρώτα συνεχόμενα ασφαλιστικά έτη. Δεν ισχύει η αναμονή σε κάκωση που αποδεικνύεται ιατρικά και απεικονιστικά"),
             ("Treatment and surgical removal of moles and papillomas", "Θεραπεία και χειρουργική αφαίρεση σπίλων και θηλωμάτων", "The first three (3) consecutive insurance years", "Τα τρία (3) πρώτα συνεχόμενα ασφαλιστικά έτη"),
+            ("Congenital conditions (Article 7)", "Συγγενείς παθήσεις (Άρθρο 7)", "Manifested or diagnosed after two (2) consecutive insurance years, and not known at the start. Congenital heart conditions: after five (5) consecutive insurance years", "Εκδηλώθηκαν ή διαγνώστηκαν μετά από δύο (2) συνεχόμενα ασφαλιστικά έτη και δεν ήταν γνωστές κατά την έναρξη. Καρδιολογικές συγγενείς παθήσεις: μετά από πέντε (5) συνεχόμενα ασφαλιστικά έτη"),
         ],
     },
     DOCTORS: {

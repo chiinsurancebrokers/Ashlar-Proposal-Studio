@@ -13,6 +13,7 @@ STANDARD = "hospital_standard"
 ETHNIKI = "ethniki_prosfora"
 VUMI = "vumi_euro_health_vip"
 ETHNIKI_TERMS = "ethniki_article10"
+EUROLIFE = "eurolife_my_health_first"
 
 TABLES = {
     HOSPITAL: {
@@ -116,6 +117,19 @@ TABLES = {
             ("Death of the insured: right of dependants (spouse, children) to continue", "Θάνατος του Ασφαλισμένου: δικαίωμα συνέχισης των εξαρτωμένων (σύζυγος, παιδιά)", "Individual policy, no insurability check, same or similar programme. Written request within 1 month of the date of death", "Ατομικό ασφαλιστήριο, χωρίς έλεγχο ασφαλισιμότητας, με το ίδιο ή παρόμοιο πρόγραμμα. Έγγραφη αίτηση εντός 1 μηνός από την ημερομηνία θανάτου"),
         ],
     },
+    EUROLIFE: {
+        "title": {"en": "Eurolife My Health First B 750 (offer 1498396)", "el": "Eurolife My Health First B 750 (προσφορά 1498396)"},
+        "intro": {
+            "en": "The offer gives these main waiting periods. The exact illnesses behind each period are in the policy wording, which the offer does not include. For specific illnesses the offer says 6 months, 1, 2 or 5 years, so the longest is counted here.",
+            "el": "Η προσφορά αναγράφει τις παρακάτω κύριες περιόδους αναμονής. Οι συγκεκριμένες παθήσεις κάθε περιόδου αναγράφονται στο ασφαλιστήριο, που δεν περιλαμβάνεται στην προσφορά. Για συγκεκριμένες παθήσεις η προσφορά αναφέρει 6 μήνες, 1, 2 ή 5 έτη, και εδώ μετράται η μεγαλύτερη.",
+        },
+        "rows": [
+            ("Hospitalisation due to illness", "Νοσηλείες λόγω ασθένειας", "The first 1 month", "Ο πρώτος 1 μήνας"),
+            ("Specific illnesses (list in the policy wording)", "Συγκεκριμένες παθήσεις (κατάλογος στο ασφαλιστήριο)", "Up to five (5) insurance years, depending on the illness", "Έως πέντε (5) ασφαλιστικά έτη ανάλογα με την πάθηση"),
+            ("Rehabilitation and recovery costs", "Δαπάνες αποθεραπείας και αποκατάστασης", "The first insurance year", "Το πρώτο ασφαλιστικό έτος"),
+            ("Maternity allowance", "Επίδομα μητρότητας", "The first two (2) consecutive insurance years", "Τα δύο (2) πρώτα συνεχόμενα ασφαλιστικά έτη"),
+        ],
+    },
 }
 
 
@@ -128,6 +142,8 @@ def tables_for(label: str, riders: Iterable[str] = ()) -> list[str]:
         keys.append(STANDARD if "standard" in name else HOSPITAL)
     if "εθνική" in name or "ethniki" in name:
         keys += [ETHNIKI, ETHNIKI_TERMS]
+    if "eurolife" in name:
+        keys.append(EUROLIFE)
     if "vumi" in name:
         keys.append(VUMI)
     keys += [r for r in riders if r in TABLES and r not in keys]

@@ -107,7 +107,7 @@ _MERIT = {
         "title": "Best plan on cover quality", "tag_merit": "Our recommendation: strongest cover, whatever it costs",
         "tag_budget": "Best balance of cover and premium", "plan": "Plan", "score": "Cover score",
         "best_merit": "On cover alone, whatever it costs, the strongest plan is {name}.",
-        "best_budget": "For the budget and needs you stated, the best fit is {name}.",
+        "best_budget": "Measured against the needs you stated, the plan that fits them most closely is {name}.",
         "same": "These are the same plan.",
         "intro": "This ranking looks only at what each plan gives: the annual limit, the participation you pay, the waiting periods, where you are covered and how wide the hospital network is. Price is not part of it. A plan can be the best on cover and still not be the one that fits your budget.",
         "dims": {"limit": "Annual limit", "deductible": "Participation", "waiting": "Waiting periods",
@@ -120,7 +120,7 @@ _MERIT = {
         "title": "Το καλύτερο πρόγραμμα βάσει παροχών", "tag_merit": "Η σύστασή μας: οι καλύτερες παροχές, ανεξάρτητα από το κόστος",
         "tag_budget": "Καλύτερη σχέση κάλυψης και ασφαλίστρου", "plan": "Πρόγραμμα", "score": "Βαθμός παροχών",
         "best_merit": "Με βάση μόνο τις παροχές, ανεξάρτητα από το κόστος, το ισχυρότερο πρόγραμμα είναι {name}.",
-        "best_budget": "Για τον προϋπολογισμό και τις ανάγκες που δηλώσατε, η καλύτερη επιλογή είναι {name}.",
+        "best_budget": "Με μέτρο τις ανάγκες που δηλώσατε, το πρόγραμμα που τις καλύπτει πιο στενά είναι {name}.",
         "same": "Πρόκειται για το ίδιο πρόγραμμα.",
         "intro": "Η κατάταξη αυτή εξετάζει μόνο όσα προσφέρει κάθε πρόγραμμα: το ετήσιο όριο, τη συμμετοχή που πληρώνετε, τις περιόδους αναμονής, την περιοχή κάλυψης και το πλήθος των νοσοκομείων του δικτύου. Η τιμή δεν συμμετέχει. Ένα πρόγραμμα μπορεί να είναι το καλύτερο σε παροχές και να μην είναι αυτό που ταιριάζει στον προϋπολογισμό σας.",
         "dims": {"limit": "Ετήσιο όριο", "deductible": "Συμμετοχή", "waiting": "Αναμονές",
@@ -284,10 +284,10 @@ def _compare_section(outcome: Result, prof: dict, lang: str, s: dict, top: int,
     return html
 
 
-def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str) -> list[str]:
+def confirmations(outcome: Result, profiles: Sequence[Profile], lang: str, best: Selection | None = None) -> list[str]:
     s = _STRINGS[lang]
     lines: list[str] = []
-    best = outcome.winner
+    best = best or outcome.winner
     if best is None:
         return lines
     for offer_label, benefit in best.unconfirmed_must:
@@ -311,8 +311,9 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
                         riders: dict | None = None, extra_points: Sequence[str] = (),
                         quality: dict | None = None, baseline: tuple | None = None,
                         extra_sections: Sequence[tuple[str, str]] = (),
-                        limits: dict | None = None, broker_choice: tuple[str, str] | None = None) -> str:
-    """The study as one HTML page. ``outcome`` must have a winner."""
+                        limits: dict | None = None, broker_choice: tuple[str, str] | None = None,
+                        recommended: str | None = None) -> str:
+    """The study as one HTML page. ``recommended`` is a plan name the broker chose to lead with. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
     s = dict(_STRINGS[lang])
@@ -325,6 +326,12 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
         s["chosen"] = {"en": "The plan that fits best", "el": "Το πρόγραμμα που ταιριάζει καλύτερα"}[lang]
         s["why"] = {"en": "Why this plan", "el": "Γιατί αυτό το πρόγραμμα"}[lang]
     best: Selection = outcome.winner
+    if recommended:
+        pick = [x for x in outcome.ranked if recommended.lower() in x.label.lower()]
+        if pick:
+            best = pick[0]
+            s["chosen"] = {"en": "Our recommendation", "el": "Η πρότασή μας"}[lang]
+            s["why"] = {"en": "Why this plan", "el": "Γιατί αυτό το πρόγραμμα"}[lang]
     prof = {p.person: p for p in profiles}
     e = escape
 
@@ -377,9 +384,11 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
 
     def _tags(x: Selection) -> str:
         t = ""
-        if merit_best is not None and x is merit_best:
+        if merit_best is not None and x is merit_best and not (recommended and x is best):
             t += f' <span class="tag good">{e(mm["tag_merit"])}</span>'
-        if x is outcome.winner:
+        if recommended and x is best:
+            t += f' <span class="tag good">{e({"en": "Our recommendation", "el": "Η πρότασή μας"}[lang])}</span>'
+        elif x is outcome.winner and not recommended:
             t += f' <span class="tag">{e(mm["tag_budget"])}</span>'
         return t
 
@@ -410,7 +419,7 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     else:
         others = _table([s["combo"], s["cost"], s["fit"]], other_rows, numeric=(1, 2))
 
-    conf = confirmations(outcome, profiles, lang) + list(extra_points)
+    conf = confirmations(outcome, profiles, lang, best) + list(extra_points)
     conf_html = ("<ul>" + "".join(f"<li>{e(c)}</li>" for c in conf) + "</ul>") if conf else f"<p>{e(s['none_confirm'])}</p>"
     waiting_html = ""
     shown: list[str] = []

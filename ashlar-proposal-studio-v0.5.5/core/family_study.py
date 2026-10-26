@@ -311,7 +311,7 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
                         riders: dict | None = None, extra_points: Sequence[str] = (),
                         quality: dict | None = None, baseline: tuple | None = None,
                         extra_sections: Sequence[tuple[str, str]] = (),
-                        limits: dict | None = None) -> str:
+                        limits: dict | None = None, broker_choice: tuple[str, str] | None = None) -> str:
     """The study as one HTML page. ``outcome`` must have a winner."""
     if outcome.winner is None:
         raise ValueError("No winning combination to write up.")
@@ -429,8 +429,10 @@ def render_family_study(outcome: Result, profiles: Sequence[Profile], *, lang: s
     compare_html = _compare_section(outcome, prof, lang, s, top, limits)
     others_no = 3 + len(extra_sections) + (1 if waiting_html else 0) + (1 if merit_ranked else 0)   # position of the comparison section
     blind_note = f'<p class="note">{e(_BASE[lang]["blind"].format(n=others_no))}</p>' if baseline else ""
+    choice_html = (f'<div class="note"><p><b>{e(broker_choice[0])}</b></p><p>{e(broker_choice[1])}</p></div>'
+                   if broker_choice else "")
     sections = [
-        (s["title"], f"<p>{e(s['prepared'])} {who}{e(today)}</p><p>{e(s['intro'])}</p>"
+        (s["title"], f"<p>{e(s['prepared'])} {who}{e(today)}</p><p>{e(s['intro'])}</p>{choice_html}"
                      f"<h2>{e(s['people'])}</h2>{covers}<h2>{e(s['chosen'])}</h2>{costs}"
                      f"<p>{_money(best.total, s)} {e(s['per_year'])}, {_money(best.total / 12, s)} {e(s['per_month'])}.</p>"
                      f"{blind_note}"

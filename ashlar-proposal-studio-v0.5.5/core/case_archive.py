@@ -153,3 +153,19 @@ def delete_case(case_id: str) -> bool:
         return bool(rows) or True
     except Exception as exc:
         raise CaseArchiveError(f"Could not delete saved case: {exc}") from exc
+
+
+def save_family_mix(case_id: str, record: dict) -> dict:
+    """Store the chosen family combination on an existing case. Touches only that column."""
+    if not case_id:
+        raise CaseArchiveError("Save the case first, then save the combination to it.")
+    try:
+        rows = (_sb().table(_table())
+                .update({"family_mix_json": _json_safe(record), "updated_at": datetime.now(timezone.utc).isoformat()})
+                .eq("id", case_id).execute().data or [])
+    except Exception as exc:
+        raise CaseArchiveError(
+            f"Could not save the combination. Run supabase/cases_schema.sql once. Technical detail: {exc}") from exc
+    if not rows:
+        raise CaseArchiveError("Saved case was not found.")
+    return rows[0]

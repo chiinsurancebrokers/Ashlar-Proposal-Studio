@@ -38,3 +38,7 @@ alter table public.analysis_cases add column if not exists client_age integer;
 -- v0.5.6: insured dependants (spouse / children) entered with the case.
 alter table public.analysis_cases
   add column if not exists household_members_json jsonb not null default '[]'::jsonb;
+
+-- v0.5.7: the family combination chosen in Family Mix, saved with the case.
+alter table public.analysis_cases
+  add column if not exists family_mix_json jsonb;

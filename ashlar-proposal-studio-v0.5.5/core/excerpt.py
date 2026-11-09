@@ -7,6 +7,8 @@ benefit content and the best pages are kept, in their original order.
 """
 from __future__ import annotations
 
+import logging
+
 import re
 
 _MARKER = re.compile(r"(?=^--- (?:PAGE \d+|LIBRARY DOCUMENT: [^\n]*|DOCUMENT: [^\n]*) ---)", re.M)
@@ -54,6 +56,12 @@ def benefit_focused_excerpt(text: str, cap: int) -> str:
             keep.add(i)
             used += len(chunks[i])
 
+    dropped = len(chunks) - len(keep)
+    if dropped:
+        logging.getLogger(__name__).info(
+            "benefit_focused_excerpt kept %d of %d pages (cap %d chars); %d pages omitted",
+            len(keep), len(chunks), cap, dropped,
+        )
     out, gap = [], False
     for i, chunk in enumerate(chunks):
         if i in keep:

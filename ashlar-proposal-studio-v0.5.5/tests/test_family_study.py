@@ -80,3 +80,105 @@ def test_save_family_mix_needs_a_case(monkeypatch):
     from core.case_archive import CaseArchiveError, save_family_mix
     with pytest.raises(CaseArchiveError):
         save_family_mix("", {})
+
+
+def _two_katja_options():
+    people = [profile("katja", "Katja", "Greece", {"inpatient": "Must have", "outpatient": "Medium"}, "High")]
+    def r(p, plan, amt, freq, disp=None, **b):
+        return {"provider": p, "target_plan": plan, "analysis": {"provider": p, "plan_name": plan,
+                "premium": {"amount": amt, "currency": "EUR", "frequency": freq}, "benefits": b, "benefit_display": disp or {}}}
+    results = [r("Εθνική", "Προνομιακή Προστασία", "83.48", "monthly", {"inpatient": "Έως €1.000.000"},
+                 inpatient="Up to EUR 1,000,000 per year", outpatient="Unlimited visits at EUR 10"),
+               r("Generali", "Life On Standard", "116.87", "monthly", {"inpatient": "Έως €50.000"},
+                 inpatient="Up to EUR 50,000 per year", outpatient="Unlimited visits at EUR 20")]
+    offers, _ = offers_from_assignments(results, {0: ["katja"], 1: ["katja"]})
+    return optimise(people, offers), people
+
+
+def test_compare_section_shows_each_option_with_its_quoted_text():
+    outcome, people = _two_katja_options()
+    html = render_family_study(outcome, people, lang="el")
+    assert "Σύγκριση επιλογών για Katja" in html
+    assert "Έως €1.000.000" in html and "Έως €50.000" in html
+    assert "€1.402,44" in html and "€1.001,76" in html
+
+
+def test_combination_labels_use_names_not_keys_and_fit_uses_greek_decimals():
+    outcome, people = _outcome()
+    html = render_family_study(outcome, people, lang="el")
+    assert "(katja)" not in html and "(d1)" not in html
+    import re
+    assert re.search(r"\b0,\d\d\b", html) and not re.search(r"<td class=\"num\">0\.\d\d<", html)
+
+
+def test_waiting_table_follows_plan_name_and_covers_alternatives():
+    outcome, people = _two_katja_options()
+    html = render_family_study(outcome, people, lang="en", riders={"Generali Life On Standard": ["doctors_exams_premium"]})
+    assert "Hospital Standard (Article 5)" in html and "Hospital Premium Flexi" not in html
+    assert "Doctors &amp; Exams Premium (Article 3)" in html
+    assert "Εθνική Προνομιακή Προστασία (offer" in html
+
+
+def test_reasons_are_a_ticked_list_with_text_beside_every_mark():
+    outcome, people = _outcome()
+    html = render_family_study(outcome, people, lang="el")
+    assert 'class="checks"' in html and "✓" in html and "–" in html
+    assert 'aria-hidden="true">✓</span>Νοσοκομειακά (απαραίτητη): ' in html
+    assert "Δεν φαίνεται στην προσφορά" in html and 'class="legend"' in html
+
+
+def test_benefit_grid_states_the_quoted_limits():
+    outcome, people = _two_katja_options()
+    html = render_family_study(outcome, people, lang="el")
+    grid = html.split("Τι καλύπτει κάθε πρόγραμμα")[1].split("Σύγκριση επιλογών")[0]
+    assert "Έως €1.000.000" in grid
+
+
+def test_grid_shows_a_dash_not_unknown_when_the_person_has_no_need():
+    outcome, people = _outcome()      # Katja has a dental need, Daughter does not
+    html = render_family_study(outcome, people, lang="en")
+    grid = html.split("What each plan covers")[1]
+    row = [r for r in grid.split("<tr>") if "Dental" in r][0]
+    assert "—" in row
+
+
+def test_vumi_waiting_table_matches_by_name():
+    from core import waiting_periods as wp
+    keys = wp.tables_for("VUMI Euro Health VIP Priority")
+    assert keys == [wp.VUMI]
+    rows = dict(wp.rows(wp.VUMI, "en"))
+    assert rows["General waiting period"] == "30 days"
+    assert rows["HIV-AIDS"] == "36 months"
+
+
+def test_merit_recommendation_ignores_price():
+    from core import plan_quality as pq, waiting_periods as wp
+    cheap = pq.PlanQuality(limit=50_000, deductible=1500, waiting_tables=(wp.STANDARD,), area="abroad", network=2)
+    rich = pq.PlanQuality(limit=3_000_000, deductible=0, waiting_tables=(wp.VUMI,), area="eu", network=5)
+    ranked, dims = pq.rank({"cheap": cheap, "rich": rich})
+    assert ranked[0].key == "rich"
+    assert "exclusions" not in dims            # not rated for either plan, so not scored
+
+
+def test_missing_dimension_is_dropped_for_every_plan():
+    from core import plan_quality as pq
+    a = pq.PlanQuality(limit=1_000_000, network=3)
+    b = pq.PlanQuality(limit=1_000_000)
+    _, dims = pq.rank({"a": a, "b": b})
+    assert dims == ("limit",)
+
+
+def test_every_waiting_period_text_is_readable():
+    from core import plan_quality as pq, waiting_periods as wp
+    for key in (wp.HOSPITAL, wp.DOCTORS, wp.STANDARD, wp.ETHNIKI, wp.VUMI):
+        assert pq.waiting_months([key]) > 0
+
+
+def test_vs_baseline_wording():
+    from decimal import Decimal
+    from core.family_study import _vs_baseline, _STRINGS
+    s = _STRINGS["el"]
+    base = ("σημερινό", Decimal("1656.36"))
+    assert _vs_baseline(Decimal("1507.15"), base, "el", s) == "€149,21 λιγότερο"
+    assert _vs_baseline(Decimal("2179.25"), base, "el", s) == "€522,89 περισσότερο"
+    assert _vs_baseline(Decimal("1656.36"), base, "el", s) == "το σημερινό πρόγραμμα"

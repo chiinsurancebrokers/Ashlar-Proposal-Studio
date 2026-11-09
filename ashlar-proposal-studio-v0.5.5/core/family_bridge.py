@@ -28,6 +28,7 @@ BENEFITS = {
     "diagnostics_imaging": "Diagnostics and imaging",
     "preventive": "Preventive care and check-ups",
     "evacuation_repatriation": "Evacuation and repatriation",
+    "emergency": "Emergency and urgent care",
 }
 WEIGHTS = {"Must have": MUST, "High": HIGH, "Medium": MEDIUM, "Low": LOW}
 BUDGETS = {"High": "high", "Normal": "normal", "Low": "low"}
@@ -50,6 +51,19 @@ def benefit_state(text) -> str:
 def benefit_states(analysis: Mapping) -> dict[str, str]:
     benefits = analysis.get("benefits") or {}
     return {key: benefit_state(benefits.get(key)) for key in BENEFITS}
+
+
+def benefit_details(analysis: Mapping) -> dict[str, str]:
+    """The text to show beside each benefit state. ``benefit_display`` (for example the same cells in
+    the client's language) wins over ``benefits``; blank cells are left out."""
+    shown = analysis.get("benefit_display") or {}
+    benefits = analysis.get("benefits") or {}
+    out: dict[str, str] = {}
+    for key in BENEFITS:
+        text = str(shown.get(key) or benefits.get(key) or "").strip()
+        if text and text.casefold() not in _NOT_SHOWN:
+            out[key] = text
+    return out
 
 
 def plan_display(result: Mapping) -> str:
@@ -80,7 +94,7 @@ def offer_from_result(offer_id: str, result: Mapping, persons: Iterable[str], *,
     label = plan_display(result)
     return Offer(offer_id, label, label, persons, Decimal(str(total)),
                  frozenset(r for r in (residences or []) if str(r).strip()) or frozenset({"*"}),
-                 benefit_states(analysis)), ""
+                 benefit_states(analysis), details=benefit_details(analysis)), ""
 
 
 def offers_from_assignments(results: list[Mapping], assignments: Mapping[int, Iterable[str]], *,
@@ -110,7 +124,9 @@ def profile(person: str, name: str, residence: str, needs: Mapping[str, str], bu
 
 
 def _key(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
+    # \w is Unicode-aware, so Greek names keep their letters. An ASCII-only pattern turned
+    # "Δεύτερη κόρη" into an empty key and made two Greek names collide.
+    return re.sub(r"[\W_]+", "-", name.casefold()).strip("-")
 
 
 def profiles_from_tables(people: Iterable[Mapping], needs_table: Iterable[Mapping]) -> tuple[list[Profile], list[str]]:
@@ -148,7 +164,7 @@ def person_key(name: str) -> str:
 
 def run_family_mix(people_rows: Iterable[Mapping], need_rows: Iterable[Mapping], results: list[Mapping],
                    assignments: Mapping[int, Iterable[str]], *, residences: Mapping[int, Iterable[str]] | None = None,
-                   budget_cap=None):
+                   budget_cap=None, order: str = "fit"):
     """Everything the screen does on the button: profiles, offers, then the optimiser.
 
     ``need_rows`` may name a benefit by its label or its key. Returns ``(outcome, profiles, notes)``
@@ -162,4 +178,4 @@ def run_family_mix(people_rows: Iterable[Mapping], need_rows: Iterable[Mapping],
     offers, notes = offers_from_assignments(results, assignments, residences=residences)
     if not profiles or not offers:
         return None, profiles, warnings + notes
-    return optimise(profiles, offers, budget_cap=budget_cap), profiles, warnings + notes
+    return optimise(profiles, offers, budget_cap=budget_cap, order=order), profiles, warnings + notes

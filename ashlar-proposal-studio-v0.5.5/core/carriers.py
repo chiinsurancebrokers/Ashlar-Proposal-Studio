@@ -405,6 +405,9 @@ def bupa_quote_facts(text: str) -> dict:
         hints["optical"] = "Not covered on this quotation."
     return facts
 
+_NOW_HEALTH_FREQUENCY = {"mont": "Monthly", "quar": "Quarterly", "semi": "Semi-annual", "half": "Semi-annual", "annu": "Annual", "year": "Annual"}
+
+
 def now_health_quote_facts(text: str) -> dict:
     facts = generic_quote_facts(text)
     if not text:
@@ -417,7 +420,16 @@ def now_health_quote_facts(text: str) -> dict:
 
     premium = re.search(r"Final\s+Total\s+Premium\s*:\s*(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)", text, flags=re.IGNORECASE)
     if premium:
-        facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": "Annual"}
+        # Now Health quotes the Final Total Premium for the chosen payment frequency,
+        # not per year. Reading it as "Annual" understated a monthly quote twelve-fold.
+        freq = re.search(r"Payment\s+frequency\s*:\s*(?P<f>Month|Quarter|Semi|Half|Annual|Year)", text, flags=re.IGNORECASE)
+        frequency = _NOW_HEALTH_FREQUENCY.get(freq.group("f").casefold()[:4], "Annual") if freq else None
+        if frequency is None:
+            facts.setdefault("fact_warnings", []).append(
+                "Payment frequency not found on the quotation; the premium is assumed annual. Check it."
+            )
+            frequency = "Annual"
+        facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": frequency}
         facts["quote_currency"] = facts["premium"]["currency"]
 
     uw = re.search(r"Underwriting\s+Basis\s*:\s*(?P<uw>[^\n\r]+)", text, flags=re.IGNORECASE)
@@ -435,8 +447,24 @@ def now_health_quote_facts(text: str) -> dict:
             text,
             flags=re.IGNORECASE | re.DOTALL,
         )
+    block = None
+    if not deductible and re.search(r"In/Day-Patient\s+Annual\s+Deductible", text, flags=re.IGNORECASE):
+        # PDF text order puts every label first and then every value; the value block
+        # reads "<country> / <area> / <network> / <deductible amount>".
+        block = re.search(
+            r"\n(?P<area>Europe|Worldwide(?:\s+(?:Excluding|Including)\s+USA)?)\s*\n\s*(?P<network>SimpleCare\s+(?:Europe|Comprehensive))\s*\n\s*(?P<cur>EUR|USD|GBP|€|\$|£)\s*(?P<amt>\d[\d,.]*)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if block:
+            deductible = block
+            facts["area_of_cover"] = re.sub(r"\s+", " ", block.group("area")).strip().title().replace("Usa", "USA")
+            facts["network"] = re.sub(r"\s+", " ", block.group("network")).strip()
     if deductible:
-        phrase = f"{_pretty_money(deductible.group('cur'), deductible.group('amt'))} in/day-patient annual deductible"
+        phrase = (
+            f"{_pretty_money(deductible.group('cur'), deductible.group('amt'))} annual deductible, "
+            "applies to in-patient and day-patient care only; no deductible is stated for out-patient care"
+        )
         if re.search(r"Out-Patient\s+Options\s+Selected\s*:\s*No\s+Out-Patient\s+Options", text, flags=re.IGNORECASE | re.DOTALL):
             phrase += "; no optional outpatient excess/co-insurance selected"
         facts["deductible_or_excess"] = phrase
@@ -481,7 +509,7 @@ def now_health_quote_facts(text: str) -> dict:
 
     # Surface a possible quote/network mismatch without deciding that either source is wrong.
     network = re.search(r"Network\s*:\s*(?P<network>SimpleCare\s+(?:Europe|Comprehensive))", text, flags=re.IGNORECASE)
-    if network:
+    if network and not facts.get("network"):
         facts["network"] = network.group("network").strip()
         if facts.get("area_of_cover") == "Worldwide excluding USA" and "europe" in facts["network"].casefold():
             facts.setdefault("fact_warnings", []).append(

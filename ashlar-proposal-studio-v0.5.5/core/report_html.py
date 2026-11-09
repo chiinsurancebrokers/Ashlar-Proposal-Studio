@@ -404,6 +404,8 @@ def _masthead(client_analysis: dict, results: list[dict], lab: dict, language: s
         (lab["prepared_on"], today),
     ]
     reference = str(client_analysis.get("case_reference") or "").strip()
+    if reference.casefold() == "unnamed case":
+        reference = ""  # the placeholder for a blank reference is not a reference
     if reference:
         cells.append(("Ref", reference))
     if results:

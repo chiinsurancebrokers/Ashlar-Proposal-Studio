@@ -47,7 +47,9 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from .benefit_audit import AGREES, DISAGREES, NOT_FOUND, _ALLOWED, _client
+from .benefit_audit import (
+    AGREES, DISAGREES, NOT_FOUND, PER_QUOTE, _ALLOWED, _client, quote_for_prompt,
+)
 from .excerpt import _DOC_HEADER, _MARKER
 from .model_errors import explain as explain_model_error
 
@@ -242,7 +244,7 @@ class LimitationFinding:
 
     @property
     def needs_attention(self) -> bool:
-        return self.verdict != AGREES
+        return self.verdict not in (AGREES, PER_QUOTE)
 
 
 @dataclass(frozen=True)
@@ -269,6 +271,10 @@ class LimitationAuditResult:
         return [f for f in self.findings if f.verdict == NOT_FOUND]
 
     @property
+    def per_quote(self) -> list[LimitationFinding]:
+        return [f for f in self.findings if f.verdict == PER_QUOTE]
+
+    @property
     def is_clean(self) -> bool:
         """True only when the check ran, nothing is disputed and nothing was missed.
 
@@ -278,25 +284,35 @@ class LimitationAuditResult:
         return self.ran and not self.disagreements and not self.missed
 
 
-PROMPT = """You are checking another analyst's work against an insurer's own document.
+PROMPT = """You are checking another analyst's work against an insurer's own document and the applicant's own quote.
 The analyst listed the clauses of one plan that limit or condition cover, the ones a client could easily miss.
 
-PART 1. For EACH limitation line below, decide only this: does the DOCUMENT support what the analyst wrote, including the figure?
+You have TWO sources:
+- QUOTE: the applicant-specific quotation. It is the only source for which optional modules were selected, which deductible or cost share was chosen, the premium and the cover area.
+- DOCUMENT: the insurer's brochure, table of benefits or wording. It is the only source for the terms and limits of each benefit. It usually lists optional modules and deductibles as OPTIONS, never as choices.
+
+PART 1. For EACH limitation line below, decide only this: do the sources support what the analyst wrote, including the figure?
 
 PART 2. Look in the DOCUMENT for clauses that cap, condition or exclude cover in a way a client could easily miss (day or visit caps, sub-limits, co-payments, waiting periods, pre-authorisation duties, exclusions of common treatments) and that are NOT covered by any analyst line.
 
-Return JSON: {"findings": [{"key": "<limitation key>", "verdict": "agrees|disagrees|not_found", "note": "<the document's own words, when you disagree>"}], "possibly_missed": [{"topic": "<short label>", "quote": "<words copied exactly from the document>"}]}
+Return JSON: {"findings": [{"key": "<limitation key>", "verdict": "agrees|disagrees|per_quote|not_found", "note": "<the source's own words, when you disagree>"}], "possibly_missed": [{"topic": "<short label>", "quote": "<words copied exactly from the document>"}]}
 
 Rules:
-- "agrees": the document supports the line, with the same figure and the same conditions.
-- "disagrees": the document says something materially different (another figure, another unit, another scope). Quote the document in `note`.
-- "not_found": the document does not address this limitation. This is not a criticism.
+- "agrees": the DOCUMENT supports the line, with the same figure and the same conditions.
+- "per_quote": the limit itself is in the DOCUMENT, and the only thing the DOCUMENT cannot show is a selection, deductible or price that the QUOTE confirms (for example a limit that sits in an optional module the quote shows as selected, or a deductible the quote shows as chosen). Use this instead of "disagrees" when the document merely calls something optional or lists deductible options.
+- "disagrees": a source says something materially different (another figure, another unit, another scope), or the QUOTE contradicts a selection the analyst wrote. Quote the source in `note`.
+- "not_found": neither source addresses this limitation. This is not a criticism.
 - Judge the substance, not the wording. The same limit in different words agrees.
 - The document may show several plans or tiers side by side. Judge against the plan named below and no other column.
-- Use ONLY the document. If it is silent, say not_found rather than reasoning from what is usual.
-- For possibly_missed: at most {max_missed} items, only clauses that materially change what a claim pays, each with a `quote` of at most 40 words copied exactly from the document. If you cannot quote it, do not list it. If there are none, return [].
+- Use ONLY the two sources. If both are silent, say not_found rather than reasoning from what is usual.
+- For possibly_missed: at most {max_missed} items, only clauses that materially change what a claim pays, each with a `quote` of at most 40 words copied exactly from the DOCUMENT. If you cannot quote it, do not list it. If there are none, return [].
 
 PLAN: {plan}
+
+APPLICANT: {applicant}
+
+QUOTE:
+{quote}
 
 DOCUMENT:
 {document}
@@ -354,6 +370,7 @@ def quote_in_document(quote: str, document_text: str) -> bool:
 
 
 def audit_plan(*, plan_name: str, analysis: dict, document_text: str,
+               quote_text: str = "", applicant: str = "",
                model: str = "", client=None) -> LimitationAuditResult:
     """Check one plan's limitations, and look for ones it is missing."""
     if not (document_text or "").strip():
@@ -372,6 +389,8 @@ def audit_plan(*, plan_name: str, analysis: dict, document_text: str,
         prompt = (
             PROMPT.replace("{max_missed}", str(MAX_MISSED))
             .replace("{plan}", plan_name)
+            .replace("{applicant}", applicant or "(not stated)")
+            .replace("{quote}", quote_for_prompt(quote_text))
             .replace("{document}", excerpt)
             .replace("{lines}", listing)
         )
@@ -404,8 +423,10 @@ def audit_plan(*, plan_name: str, analysis: dict, document_text: str,
         if verdict not in _ALLOWED:
             # An answer outside the three offered is not approval.
             verdict = NOT_FOUND
-        absent = missing_figures(detail, document_text)
-        if absent and verdict == AGREES:
+        # A figure that comes from the applicant's quote (a chosen deductible, a
+        # selected module's price) is legitimately absent from the brochure.
+        absent = missing_figures(detail, f"{document_text}\n{quote_text or ''}")
+        if absent and verdict in (AGREES, PER_QUOTE):
             # The second reader agreed, but a figure the line stands on appears
             # nowhere in the document text. That is not an agreement.
             verdict = NOT_FOUND
@@ -431,7 +452,7 @@ def audit_plan(*, plan_name: str, analysis: dict, document_text: str,
 
 
 def audit_case(*, results: list[dict], documents: dict[str, str],
-               model: str = "", client=None) -> LimitationAuditResult:
+               applicant: str = "", model: str = "", client=None) -> LimitationAuditResult:
     """Check every plan in the case. `documents` maps plan name to its text."""
     from .client_analysis import plan_display_name
 
@@ -445,6 +466,8 @@ def audit_case(*, results: list[dict], documents: dict[str, str],
             plan_name=name,
             analysis=result.get("analysis") or {},
             document_text=documents.get(name, ""),
+            quote_text=str(result.get("quotation_text") or ""),
+            applicant=applicant,
             model=model,
             client=client,
         )

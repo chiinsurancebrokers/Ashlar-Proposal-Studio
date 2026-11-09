@@ -397,6 +397,66 @@ def _extract_library_documents(docs):
     return "\n\n".join(brochure_texts), "\n\n".join(wording_texts), plan_pdf_docs
 
 
+_FREQUENCIES = ["Annual", "Monthly", "Quarterly", "Semi-annual"]
+
+
+def render_edit_terms(result: dict, index: int) -> None:
+    """Let the broker correct headline terms that the extractor got wrong.
+
+    Corrections are written into the analysis, so the comparison table, the report and
+    the second-opinion fingerprint all use the corrected values. Each edited field is
+    listed under ``manual_overrides`` so the report can show that a person changed it.
+    """
+    analysis = result.setdefault("analysis", {})
+    premium = analysis.get("premium") if isinstance(analysis.get("premium"), dict) else {}
+    edited = list(analysis.get("manual_overrides") or [])
+    label = "Correct extracted terms" + (f" ({len(edited)} edited)" if edited else "")
+    with st.expander(label):
+        st.caption("Fix any term the extraction read wrongly, such as a monthly premium shown as annual. Saved values are used in the table and the client report.")
+        with st.form(f"edit_terms_{index}"):
+            c1, c2, c3 = st.columns([1, .7, 1])
+            amount = c1.text_input("Premium amount", value=str(premium.get("amount") or ""))
+            currency = c2.text_input("Currency", value=str(premium.get("currency") or "EUR"))
+            current_freq = str(premium.get("frequency") or "Annual")
+            freq_options = _FREQUENCIES if current_freq in _FREQUENCIES else [current_freq] + _FREQUENCIES
+            frequency = c3.selectbox("Premium is paid", freq_options, index=freq_options.index(current_freq))
+            plan_name = st.text_input("Plan name", value=str(analysis.get("plan_name") or ""))
+            annual_limit = st.text_input("Annual limit", value=str(analysis.get("annual_limit") or ""))
+            deductible = st.text_area(
+                "Deductible / excess, and which benefits it applies to",
+                value=str(analysis.get("deductible_or_excess") or ""),
+                height=80,
+                help="For example: EUR 400 annual deductible, in-patient and day-patient care only.",
+            )
+            area = st.text_input("Area of cover", value=str(analysis.get("area_of_cover") or ""))
+            if st.form_submit_button("Save corrections"):
+                new_premium = {"amount": amount.strip(), "currency": currency.strip().upper(), "frequency": frequency}
+                proposed = {
+                    "premium": new_premium,
+                    "plan_name": plan_name.strip(),
+                    "annual_limit": annual_limit.strip(),
+                    "deductible_or_excess": deductible.strip(),
+                    "area_of_cover": area.strip(),
+                }
+                changed = []
+                for key, value in proposed.items():
+                    old = analysis.get(key)
+                    if key == "premium":
+                        if (old or {}) != value and any(value.values()):
+                            analysis[key] = value
+                            changed.append(key)
+                    elif value and str(old or "").strip() != value:
+                        analysis[key] = value
+                        changed.append(key)
+                if changed:
+                    analysis["manual_overrides"] = sorted(set(edited) | set(changed))
+                    st.session_state["results"] = st.session_state.get("results") or []
+                    st.success("Saved: " + ", ".join(changed))
+                    st.rerun()
+                else:
+                    st.info("Nothing changed.")
+
+
 def _premium_display(analysis: dict) -> str:
     p = analysis.get("premium") or {}
     bits = [p.get("currency"), p.get("amount"), p.get("frequency")]
@@ -2223,8 +2283,9 @@ def case_workspace_page() -> None:
     analysis_col, chat_col = st.columns([1.62, .78], gap="large")
     with analysis_col:
         provider_tabs = st.tabs([f"{r['provider']} · {r.get('target_plan') or 'Plan not locked'}" for r in results])
-        for tab, result in zip(provider_tabs, results):
+        for n, (tab, result) in enumerate(zip(provider_tabs, results)):
             with tab:
+                render_edit_terms(result, n)
                 render_provider_result(result)
 
     with chat_col:

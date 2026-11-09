@@ -21,6 +21,9 @@ from core.client_analysis import build_comparison_matrix, generate_client_analys
 from core.report_schema import ClientReportValidationError, validate_client_report
 from core.presentation import build_pptx_bytes
 from core.benefit_audit import audit_case
+from core.report_leaks import find_broker_leaks
+from core.limitation_audit import audit_case as audit_limitations, case_fingerprint as _limitation_fingerprint
+from core.export_tables import to_excel_bytes as case_excel_bytes, to_markdown as case_markdown
 from core.report_html import build_html_bytes
 from core.report_pdf import build_pdf_bytes
 from core.client_pack import collect_client_source_documents, build_client_pack_zip
@@ -1225,6 +1228,145 @@ def render_case_chat(results: list[dict]) -> None:
             st.rerun()
 
 
+def _second_reader_documents(results: list[dict]) -> tuple[dict[str, str], list[str]]:
+    """The provider documents the second reader checks each plan against.
+
+    Returns (plan name -> document text, names of plans with no stored text).
+    """
+    documents: dict[str, str] = {}
+    missing: list[str] = []
+    for result in results or []:
+        name = plan_display_name(result)
+        text = ""
+        try:
+            items, _ = collect_client_source_documents([result], include_wording=True)
+            for item in items:
+                text += "\n\n" + str(item.document.extracted_text or "")
+        except Exception:
+            text = ""
+        if text.strip():
+            documents[name] = text
+        else:
+            missing.append(name)
+    return documents, missing
+
+
+def _md_safe(text: str) -> str:
+    """Show quoted insurer text literally. Streamlit reads paired "$" as LaTeX
+    math, which turns "EUR/US$ 500 ... EUR/US$ 2,500" into one letter per line."""
+    return str(text or "").replace("$", "\\$")
+
+
+def _applicant_context() -> str:
+    """Short applicant description for the second reader. Context only."""
+    bits = []
+    age = st.session_state.get("client_age")
+    sex = st.session_state.get("client_sex")
+    nat = st.session_state.get("client_nationality")
+    if age not in (None, ""):
+        bits.append(f"age {int(age)}")
+    if sex and sex != "Not specified":
+        bits.append(str(sex).lower())
+    if nat:
+        bits.append(f"nationality {nat}")
+    return ", ".join(bits)
+
+
+def _current_limitation_audit(results: list[dict]):
+    stored = st.session_state.get("limitation_audit")
+    if stored and stored.get("fp") == _limitation_fingerprint(results):
+        return stored.get("audit")
+    return None
+
+
+def _render_limitation_second_opinion(results: list[dict]) -> bool:
+    """A second reader checks the coverage limitations before any document is built.
+
+    The limitations are the clauses a client misses, and the reasoning that
+    wrote them is not placed to judge them. A reader from a different model
+    family checks each one against the insurer's own document (is the figure
+    there?) and looks for limiting clauses missing from the list.
+
+    Returns True only when the check ran for every plan AND the broker ticked to
+    say they have read it. A check that could not run does not open the gate.
+    """
+    st.markdown("#### Second opinion on the coverage limitations")
+    st.caption(
+        "A reader from a different model family checks every limitation against the provider "
+        "document and looks for limiting clauses that are missing from the list. "
+        "Documents cannot be generated until it has run."
+    )
+
+    documents, missing = _second_reader_documents(results)
+    fingerprint = _limitation_fingerprint(results)
+
+    if st.button("Run the limitations check"):
+        with st.spinner("A second reader is checking the limitations against the documents…"):
+            st.session_state["limitation_audit"] = {
+                "fp": fingerprint,
+                "audit": audit_limitations(
+                    results=results, documents=documents, applicant=_applicant_context(),
+                ),
+            }
+
+    audit = _current_limitation_audit(results)
+    if audit is None:
+        if st.session_state.get("limitation_audit"):
+            st.info("The analysis has changed since the last limitations check, so it has to be run again.")
+        if missing:
+            st.info(
+                "No document text is stored for: " + ", ".join(missing)
+                + ". Link the provider documents in the library so they can be checked."
+            )
+        st.warning("The limitations have not been checked yet.")
+        return False
+
+    if not audit.ran:
+        st.error(audit.error or "The second-opinion check on the limitations did not run.")
+        return False
+
+    disputed, unverified, missed = audit.disagreements, audit.unverified, audit.missed
+    if disputed:
+        st.error(f"{len(disputed)} limitation(s) disagree with the provider document.")
+        for finding in disputed:
+            with st.expander(f"{finding.plan} · {finding.topic or 'Limitation'}", expanded=True):
+                st.markdown("**We wrote:**")
+                st.write(_md_safe(finding.detail))
+                st.markdown("**The document says:**")
+                st.write(_md_safe(finding.note) or "(no quotation returned)")
+    else:
+        st.success(f"No limitation contradicts the documents ({len(audit.findings)} checked).")
+
+    if missed:
+        st.warning(
+            f"{len(missed)} clause(s) in the documents may limit cover and are not in the list. "
+            "The words below are the document's own. Decide whether the client needs to be told."
+        )
+        for item in missed:
+            with st.expander(f"{item.plan} · {item.topic or 'Possibly missed clause'}", expanded=True):
+                st.write(_md_safe(item.quote))
+
+    if audit.per_quote:
+        st.info(
+            f"{len(audit.per_quote)} limitation(s) rest on the client's own quote (selected modules, "
+            "chosen deductibles), which the provider document can only list as options. "
+            "They are confirmed by the quote and are not disputes."
+        )
+
+    if unverified:
+        st.info(
+            f"{len(unverified)} limitation(s) could not be confirmed: "
+            + ", ".join(sorted({f"{f.plan} · {f.topic or 'Limitation'}" for f in unverified}))
+            + ". Either the documents are silent on them or a figure could not be found in the text. "
+            "They are marked as not confirmed in the Excel export."
+        )
+
+    return st.checkbox(
+        "I have read the second-opinion check on the limitations, including any clause listed as possibly missed.",
+        key=f"limitation_audit_reviewed_{fingerprint[:12]}",
+    )
+
+
 def _render_benefit_second_opinion(results: list[dict]) -> bool:
     """A second reader checks the benefit lines before any document is built.
 
@@ -1246,26 +1388,13 @@ def _render_benefit_second_opinion(results: list[dict]) -> bool:
         "provider document in the library. Documents cannot be generated until it has run."
     )
 
-    documents: dict[str, str] = {}
-    missing: list[str] = []
-    for result in results or []:
-        name = plan_display_name(result)
-        text = ""
-        try:
-            items, _ = collect_client_source_documents([result], include_wording=True)
-            for item in items:
-                text += "\n\n" + str(item.document.extracted_text or "")
-        except Exception:
-            text = ""
-        if text.strip():
-            documents[name] = text
-        else:
-            missing.append(name)
+    documents, missing = _second_reader_documents(results)
 
     if st.button("Run the second-opinion check"):
         with st.spinner("A second reader is checking the benefit lines against the documents…"):
             st.session_state["benefit_audit"] = audit_case(
                 results=results, documents=documents, benefit_order=BENEFIT_ORDER,
+                applicant=_applicant_context(),
             )
 
     audit = st.session_state.get("benefit_audit")
@@ -1288,11 +1417,18 @@ def _render_benefit_second_opinion(results: list[dict]) -> bool:
         for finding in disputed:
             with st.expander(f"{finding.plan} · {finding.benefit_label}", expanded=True):
                 st.markdown("**We wrote:**")
-                st.write(finding.extracted)
+                st.write(_md_safe(finding.extracted))
                 st.markdown("**The document says:**")
-                st.write(finding.note or "(no quotation returned)")
+                st.write(_md_safe(finding.note) or "(no quotation returned)")
     else:
         st.success(f"No benefit line contradicts the documents ({len(audit.findings)} checked).")
+
+    if audit.per_quote:
+        st.info(
+            f"{len(audit.per_quote)} line(s) rest on the client's own quote (selected options, chosen "
+            "deductibles, price), which the provider document can only list as options. "
+            "They are confirmed by the quote and are not disputes."
+        )
 
     if unverified:
         st.info(
@@ -1335,12 +1471,26 @@ def render_client_deliverable(results: list[dict]) -> None:
     else:
         st.success("All analyzed options passed the material-fact quality gate.")
 
+    leaks = find_broker_leaks(results)
+    if leaks:
+        st.warning(
+            f"{len(leaks)} line(s) contain working notes written for the broker, not the client "
+            "(for example \"check the governing figure\" or \"Unclear\"). Resolve or rewrite them "
+            "before generating the client report."
+        )
+        with st.expander("Show the lines"):
+            for leak in leaks:
+                st.markdown(f"- **{_md_safe(leak.plan)}** · {_md_safe(leak.field)}: “{_md_safe(leak.phrase)}”")
+
     reviewed = st.checkbox(
         "I have reviewed the material extracted facts and plan locks before generating the client analysis.",
         key="client_report_reviewed",
     )
 
-    audit_confirmed = _render_benefit_second_opinion(results)
+    # Both checks always render, so a broker sees both. The gate needs both.
+    benefits_confirmed = _render_benefit_second_opinion(results)
+    limitations_confirmed = _render_limitation_second_opinion(results)
+    audit_confirmed = benefits_confirmed and limitations_confirmed
     report_job_active = bool(st.session_state.get("client_report_job_id"))
     c1, c2 = st.columns([1.1, 3.9])
     with c1:
@@ -1583,6 +1733,38 @@ def render_client_deliverable(results: list[dict]) -> None:
                 "report as one HTML file that opens on a phone and prints to PDF from any browser. "
                 "The ZIP contains the analysis PDF plus the actual provider brochure PDFs."
             )
+
+            # Working files for the broker: the comparison and the full list of
+            # limitations, with the second reader's verdict beside each one.
+            try:
+                limitation_result = _current_limitation_audit(results)
+                excel_bytes = case_excel_bytes(results, limitation_result)
+                markdown_bytes = case_markdown(
+                    results, limitation_result, title=f"Insurance comparison - {client_name}",
+                ).encode("utf-8")
+            except Exception as exc:
+                st.warning(f"The Excel and Markdown exports could not be built: {exc}")
+            else:
+                e1, e2, _e3, _e4 = st.columns(4)
+                with e1:
+                    st.download_button(
+                        "Download comparison + limitations (Excel)",
+                        data=excel_bytes,
+                        file_name=f"{safe_name}_Ashlar_Comparison.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        help="Every limitation, not only the few in the client report, with the second reader's verdict.",
+                    )
+                with e2:
+                    st.download_button(
+                        "Download comparison + limitations (Markdown)",
+                        data=markdown_bytes,
+                        file_name=f"{safe_name}_Ashlar_Comparison.md",
+                        mime="text/markdown",
+                        use_container_width=True,
+                    )
+                if limitation_result is None:
+                    st.caption("The limitations check has not been run for this analysis, so the export marks every limitation as not checked.")
 
             if source_documents:
                 st.markdown("### Provider documents for this case")

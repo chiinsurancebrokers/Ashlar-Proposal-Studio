@@ -20,7 +20,7 @@ A feature that finds the best combination of health plans for a mixed local and 
 
 ## Open items
 1. Run supabase/cases_schema.sql once to add the family_mix_json column.
-2. Confirm whether Katja's Generali price includes the Doctors & Exams Premium add-on. If it does, get the "Πίνακας Παροχών και Καλύψεων" (participation amounts, personal-doctor visits) and update the benefit states.
+2. ANSWERED by Generali Life On quote 08547587: the EUR 2,169.84 a year includes Doctors & Exams Premium, Prevention Standard, Hospital Premium Flexi (EUR 620,000, participation EUR 1,500), Rehabilitation Standard, basic life and two supplementary covers. Life On is modular, not hospital-only, and the participation can be 0, 750, 1,500, 3,000, 5,000 or 10,000. core/generali_plans.py holds the benefit terms; core/family_mix.py still needs its Generali benefit states updated from them.
 3. No Generali waiting-period wording for covers other than Hospital Premium Flexi and Doctors & Exams.
 4. Test the screen with a real case once Railway is back (the Railway connector needs reconnecting).
 5. Optional: align the English proposal doc with the Greek page.

@@ -35,7 +35,12 @@ from .model_errors import explain as explain_model_error
 AGREES = "agrees"
 DISAGREES = "disagrees"
 NOT_FOUND = "not_found"
-_ALLOWED = {AGREES, DISAGREES, NOT_FOUND}
+# The line rests on the applicant's own quote (which options were selected,
+# which deductible was chosen, the premium), and the quote supports it. A
+# brochure can only list the options, so the provider document cannot confirm
+# these; the quote can. They are informational, not disputes.
+PER_QUOTE = "per_quote"
+_ALLOWED = {AGREES, DISAGREES, NOT_FOUND, PER_QUOTE}
 
 # The wordings run to a hundred pages; the excerpt keeps the highest-signal
 # part of them inside a budget the second reader can actually attend to.
@@ -53,7 +58,7 @@ class BenefitFinding:
 
     @property
     def needs_attention(self) -> bool:
-        return self.verdict != AGREES
+        return self.verdict not in (AGREES, PER_QUOTE)
 
 
 @dataclass(frozen=True)
@@ -72,6 +77,10 @@ class AuditResult:
         return [f for f in self.findings if f.verdict == NOT_FOUND]
 
     @property
+    def per_quote(self) -> list[BenefitFinding]:
+        return [f for f in self.findings if f.verdict == PER_QUOTE]
+
+    @property
     def is_clean(self) -> bool:
         """True only when the check ran and found nothing to dispute.
 
@@ -81,21 +90,32 @@ class AuditResult:
         return self.ran and not self.disagreements
 
 
-PROMPT = """You are checking another analyst's work against an insurer's own document.
+PROMPT = """You are checking another analyst's work against an insurer's own document and the applicant's own quote.
 
-For EACH benefit line below, decide only this: does the DOCUMENT support what the analyst wrote?
+You have TWO sources:
+- QUOTE: the applicant-specific quotation. It is the only source for which optional modules were selected, which deductible or cost share was chosen, the premium and the cover area.
+- DOCUMENT: the insurer's brochure, table of benefits or wording. It is the only source for what a benefit pays and its terms and limits. It usually lists optional modules and deductibles as OPTIONS, never as choices.
 
-Return JSON: {"findings": [{"key": "<benefit key>", "verdict": "agrees|disagrees|not_found", "note": "<the document's own words, when you disagree>"}]}
+For EACH benefit line below, decide only this: do the sources support what the analyst wrote?
+
+Return JSON: {"findings": [{"key": "<benefit key>", "verdict": "agrees|disagrees|per_quote|not_found", "note": "<the source's own words, when you disagree>"}]}
 
 Rules:
-- "agrees": the document supports the line, including its limits and conditions.
-- "disagrees": the document says something materially different. Quote the document in `note`.
-- "not_found": the document does not address this benefit. This is not a criticism.
+- "agrees": the DOCUMENT supports the line, including its limits and conditions, and any selection or deductible it states is confirmed by the QUOTE.
+- "per_quote": the line's terms are in the DOCUMENT, and the only thing the DOCUMENT cannot show is a selection, deductible or price that the QUOTE confirms. Use this instead of "disagrees" when the document merely calls something optional or lists deductible options.
+- "disagrees": a source says something materially different (another figure, scope, condition), or the QUOTE contradicts a selection the analyst wrote. Quote the source in `note`.
+- "not_found": neither source addresses this benefit. This is not a criticism.
 - Judge the substance, not the wording. A line that says the same thing in different words agrees.
 - A line that describes an included benefit and also names what sits outside it (for example "Orthodontics are not covered" inside a dental benefit) is describing cover, not an absence.
-- Use ONLY the document. If it is silent, say not_found rather than reasoning from what is usual.
+- Use ONLY the two sources. If both are silent, say not_found rather than reasoning from what is usual.
+- The APPLICANT below is context for relevance only; it never changes what a source says.
 
 PLAN: {plan}
+
+APPLICANT: {applicant}
+
+QUOTE:
+{quote}
 
 DOCUMENT:
 {document}
@@ -129,7 +149,19 @@ def _lines_for(analysis: dict, benefit_order) -> list[tuple[str, str, str]]:
     return out
 
 
+QUOTE_CHARS = 12000
+
+
+def quote_for_prompt(quote_text: str) -> str:
+    """The applicant's quote, trimmed, or a plain note that none is stored."""
+    text = (quote_text or "").strip()
+    if not text:
+        return "(no quote text is stored for this option)"
+    return text[:QUOTE_CHARS]
+
+
 def audit_plan(*, plan_name: str, analysis: dict, document_text: str, benefit_order,
+               quote_text: str = "", applicant: str = "",
                model: str = "", client=None) -> AuditResult:
     """Check one plan's benefit lines against one document."""
     lines = _lines_for(analysis, benefit_order)
@@ -146,6 +178,8 @@ def audit_plan(*, plan_name: str, analysis: dict, document_text: str, benefit_or
         client = client or _client()
         prompt = (
             PROMPT.replace("{plan}", plan_name)
+            .replace("{applicant}", applicant or "(not stated)")
+            .replace("{quote}", quote_for_prompt(quote_text))
             .replace("{document}", benefit_focused_excerpt(document_text, DOCUMENT_CHARS))
             .replace("{lines}", "\n".join(f"- {key} ({label}): {value}" for key, label, value in lines))
         )
@@ -186,7 +220,7 @@ def audit_plan(*, plan_name: str, analysis: dict, document_text: str, benefit_or
 
 
 def audit_case(*, results: list[dict], documents: dict[str, str], benefit_order,
-               model: str = "", client=None) -> AuditResult:
+               applicant: str = "", model: str = "", client=None) -> AuditResult:
     """Check every plan in the case. `documents` maps plan name to its text."""
     from .client_analysis import plan_display_name
 
@@ -200,6 +234,8 @@ def audit_case(*, results: list[dict], documents: dict[str, str], benefit_order,
             analysis=result.get("analysis") or {},
             document_text=documents.get(name, ""),
             benefit_order=benefit_order,
+            quote_text=str(result.get("quotation_text") or ""),
+            applicant=applicant,
             model=model,
             client=client,
         )

@@ -30,7 +30,7 @@ from core.client_pack import collect_client_source_documents, build_client_pack_
 from core.email_delivery import EmailDeliveryError, email_delivery_configured, email_delivery_status, send_client_email
 from core.extract import extract_document
 from core.library_classify import canonical_name, guess_doc_type, product_mismatch, table_first
-from core.household import RELATIONSHIPS, SEXES, applicant_details, applicant_row, normalise_members
+from core.household import RELATIONSHIPS, SEXES, applicant_details, applicant_row, maternity_marked_irrelevant, normalise_members
 from core.case_runner import analyze_option, disambiguate_plan_names
 from core.plan_selector import identify_selected_plan
 from core.quality import assess_result_quality, case_quality
@@ -397,6 +397,8 @@ def _extract_library_documents(docs):
     return "\n\n".join(brochure_texts), "\n\n".join(wording_texts), plan_pdf_docs
 
 
+MATERNITY_AUTO = "Automatic"
+MATERNITY_NOT_RELEVANT = "Not relevant to this client"
 _FREQUENCIES = ["Annual", "Monthly", "Quarterly", "Semi-annual"]
 
 
@@ -845,7 +847,7 @@ def _reset_case_session() -> None:
         "client_priorities", "client_sex", "client_age", "results", "case_chat", "client_analysis",
         "loaded_case_snapshot", "client_report_reviewed", "case_archive_error",
         "client_report_job_id", "client_report_job_error", "hal_job_id", "hal_job_error", "hal_pending_question",
-        "household_base", "household_members", "include_dependants", "client_dob", "client_nationality",
+        "household_base", "household_members", "include_dependants", "client_dob", "client_nationality", "maternity_mode",
     ]:
         st.session_state.pop(key, None)
     st.session_state["household_editor_v"] = st.session_state.get("household_editor_v", 0) + 1
@@ -873,6 +875,7 @@ def _restore_case_to_session(row: dict) -> None:
     )
     st.session_state["client_dob"] = date.fromisoformat(extra["dob"]) if extra["dob"] else None
     st.session_state["client_nationality"] = extra["nationality"]
+    st.session_state["maternity_mode"] = MATERNITY_NOT_RELEVANT if maternity_marked_irrelevant(members) else MATERNITY_AUTO
     st.session_state["household_editor_v"] = st.session_state.get("household_editor_v", 0) + 1
     st.session_state["report_language"] = row.get("report_language") or "English"
     st.session_state["results"] = row.get("results_json") or []
@@ -1997,6 +2000,12 @@ def case_workspace_page() -> None:
                 placeholder="e.g. 17",
             )
         with demo_cols[2]:
+            st.selectbox(
+                "Maternity / pregnancy",
+                [MATERNITY_AUTO, MATERNITY_NOT_RELEVANT],
+                key="maternity_mode",
+                help="Automatic shows maternity when the applicant is female or a spouse is insured. Choose 'Not relevant' to leave pregnancy and maternity out of the client report.",
+            )
             nat_cols = st.columns(2)
             with nat_cols[0]:
                 st.date_input(
@@ -2055,12 +2064,12 @@ def case_workspace_page() -> None:
             members, member_warnings = normalise_members(records)
             for warning in member_warnings:
                 st.warning(warning)
-            applicant = applicant_row(dob=st.session_state.get("client_dob"), nationality=st.session_state.get("client_nationality"))
+            applicant = applicant_row(dob=st.session_state.get("client_dob"), nationality=st.session_state.get("client_nationality"), maternity_irrelevant=st.session_state.get("maternity_mode") == MATERNITY_NOT_RELEVANT)
             st.session_state["household_members"] = ([applicant] if applicant else []) + members
             if members:
                 st.caption(f"{len(members) + 1} insured people on this case (applicant + {len(members)} dependant{'s' if len(members) != 1 else ''}).")
         else:
-            applicant = applicant_row(dob=st.session_state.get("client_dob"), nationality=st.session_state.get("client_nationality"))
+            applicant = applicant_row(dob=st.session_state.get("client_dob"), nationality=st.session_state.get("client_nationality"), maternity_irrelevant=st.session_state.get("maternity_mode") == MATERNITY_NOT_RELEVANT)
             st.session_state["household_members"] = [applicant] if applicant else []
 
     try:

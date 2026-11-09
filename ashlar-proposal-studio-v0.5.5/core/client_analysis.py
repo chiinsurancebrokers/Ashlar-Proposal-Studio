@@ -15,7 +15,7 @@ from typing import Any
 
 from .amounts import annual_factor, parse_amount
 from .benefit_state import coverage_areas as _coverage_areas, mark as benefit_mark, scope_differs
-from .household import household_maternity_relevant, insured_people
+from .household import household_maternity_relevant, insured_people, maternity_marked_irrelevant
 from .json_utils import parse_best_json_object, parse_json_objects
 from .model_errors import explain as explain_model_error
 from .plan_rules import localise_access_rows
@@ -97,6 +97,8 @@ def maternity_relevant(
     or partner (a family / couple policy), or when the client raised pregnancy or
     maternity themselves. A quote that includes maternity for a family must show it.
     """
+    if maternity_marked_irrelevant(household_members):
+        return False  # the broker decided; this beats every automatic signal below
     if _normalise_sex(client_sex) == "female":
         return True
     # Entered dependants are the authority: a female member of child-bearing age

@@ -140,12 +140,25 @@ def applicant_details(rows: Any) -> dict:
     return {"dob": "", "nationality": ""}
 
 
-def applicant_row(*, dob: Any = None, nationality: Any = None) -> dict | None:
-    """Household entry carrying the applicant's own extra details (None when empty)."""
+def applicant_row(*, dob: Any = None, nationality: Any = None, maternity_irrelevant: bool = False) -> dict | None:
+    """Household entry carrying the applicant's own extra details (None when empty).
+
+    ``maternity_irrelevant`` records the broker's decision that pregnancy and maternity
+    are not a concern for this case, even though a female member of child-bearing age is
+    insured. It travels with the saved household so the background worker sees it too.
+    """
     dob_iso, nat = _dob(dob), _text(nationality)
-    if not (dob_iso or nat):
+    if not (dob_iso or nat or maternity_irrelevant):
         return None
-    return {"relationship": "Main applicant", "dob": dob_iso, "nationality": nat}
+    row = {"relationship": "Main applicant", "dob": dob_iso, "nationality": nat}
+    if maternity_irrelevant:
+        row["maternity_irrelevant"] = True
+    return row
+
+
+def maternity_marked_irrelevant(rows: Any) -> bool:
+    """True when the broker marked maternity as not relevant for this case."""
+    return any(is_applicant_row(r) and _flag(r.get("maternity_irrelevant")) for r in rows or [] if isinstance(r, dict))
 
 
 def insured_people(*, client_name: str = "", client_sex: str = "", client_age: Any = None,

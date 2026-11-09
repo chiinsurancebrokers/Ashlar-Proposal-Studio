@@ -21,6 +21,7 @@ from core.client_analysis import build_comparison_matrix, generate_client_analys
 from core.report_schema import ClientReportValidationError, validate_client_report
 from core.presentation import build_pptx_bytes
 from core.benefit_audit import audit_case
+from core.report_leaks import find_broker_leaks
 from core.limitation_audit import audit_case as audit_limitations, case_fingerprint as _limitation_fingerprint
 from core.export_tables import to_excel_bytes as case_excel_bytes, to_markdown as case_markdown
 from core.report_html import build_html_bytes
@@ -1250,6 +1251,27 @@ def _second_reader_documents(results: list[dict]) -> tuple[dict[str, str], list[
     return documents, missing
 
 
+def _md_safe(text: str) -> str:
+    """Show quoted insurer text literally. Streamlit reads paired "$" as LaTeX
+    math, which turns "EUR/US$ 500 ... EUR/US$ 2,500" into one letter per line."""
+    return str(text or "").replace("$", "\\$")
+
+
+def _applicant_context() -> str:
+    """Short applicant description for the second reader. Context only."""
+    bits = []
+    age = st.session_state.get("client_age")
+    sex = st.session_state.get("client_sex")
+    nat = st.session_state.get("client_nationality")
+    if age not in (None, ""):
+        bits.append(f"age {int(age)}")
+    if sex and sex != "Not specified":
+        bits.append(str(sex).lower())
+    if nat:
+        bits.append(f"nationality {nat}")
+    return ", ".join(bits)
+
+
 def _current_limitation_audit(results: list[dict]):
     stored = st.session_state.get("limitation_audit")
     if stored and stored.get("fp") == _limitation_fingerprint(results):
@@ -1282,7 +1304,9 @@ def _render_limitation_second_opinion(results: list[dict]) -> bool:
         with st.spinner("A second reader is checking the limitations against the documents…"):
             st.session_state["limitation_audit"] = {
                 "fp": fingerprint,
-                "audit": audit_limitations(results=results, documents=documents),
+                "audit": audit_limitations(
+                    results=results, documents=documents, applicant=_applicant_context(),
+                ),
             }
 
     audit = _current_limitation_audit(results)
@@ -1307,9 +1331,9 @@ def _render_limitation_second_opinion(results: list[dict]) -> bool:
         for finding in disputed:
             with st.expander(f"{finding.plan} · {finding.topic or 'Limitation'}", expanded=True):
                 st.markdown("**We wrote:**")
-                st.write(finding.detail)
+                st.write(_md_safe(finding.detail))
                 st.markdown("**The document says:**")
-                st.write(finding.note or "(no quotation returned)")
+                st.write(_md_safe(finding.note) or "(no quotation returned)")
     else:
         st.success(f"No limitation contradicts the documents ({len(audit.findings)} checked).")
 
@@ -1320,7 +1344,14 @@ def _render_limitation_second_opinion(results: list[dict]) -> bool:
         )
         for item in missed:
             with st.expander(f"{item.plan} · {item.topic or 'Possibly missed clause'}", expanded=True):
-                st.write(item.quote)
+                st.write(_md_safe(item.quote))
+
+    if audit.per_quote:
+        st.info(
+            f"{len(audit.per_quote)} limitation(s) rest on the client's own quote (selected modules, "
+            "chosen deductibles), which the provider document can only list as options. "
+            "They are confirmed by the quote and are not disputes."
+        )
 
     if unverified:
         st.info(
@@ -1363,6 +1394,7 @@ def _render_benefit_second_opinion(results: list[dict]) -> bool:
         with st.spinner("A second reader is checking the benefit lines against the documents…"):
             st.session_state["benefit_audit"] = audit_case(
                 results=results, documents=documents, benefit_order=BENEFIT_ORDER,
+                applicant=_applicant_context(),
             )
 
     audit = st.session_state.get("benefit_audit")
@@ -1385,11 +1417,18 @@ def _render_benefit_second_opinion(results: list[dict]) -> bool:
         for finding in disputed:
             with st.expander(f"{finding.plan} · {finding.benefit_label}", expanded=True):
                 st.markdown("**We wrote:**")
-                st.write(finding.extracted)
+                st.write(_md_safe(finding.extracted))
                 st.markdown("**The document says:**")
-                st.write(finding.note or "(no quotation returned)")
+                st.write(_md_safe(finding.note) or "(no quotation returned)")
     else:
         st.success(f"No benefit line contradicts the documents ({len(audit.findings)} checked).")
+
+    if audit.per_quote:
+        st.info(
+            f"{len(audit.per_quote)} line(s) rest on the client's own quote (selected options, chosen "
+            "deductibles, price), which the provider document can only list as options. "
+            "They are confirmed by the quote and are not disputes."
+        )
 
     if unverified:
         st.info(
@@ -1431,6 +1470,17 @@ def render_client_deliverable(results: list[dict]) -> None:
         )
     else:
         st.success("All analyzed options passed the material-fact quality gate.")
+
+    leaks = find_broker_leaks(results)
+    if leaks:
+        st.warning(
+            f"{len(leaks)} line(s) contain working notes written for the broker, not the client "
+            "(for example \"check the governing figure\" or \"Unclear\"). Resolve or rewrite them "
+            "before generating the client report."
+        )
+        with st.expander("Show the lines"):
+            for leak in leaks:
+                st.markdown(f"- **{_md_safe(leak.plan)}** · {_md_safe(leak.field)}: “{_md_safe(leak.phrase)}”")
 
     reviewed = st.checkbox(
         "I have reviewed the material extracted facts and plan locks before generating the client analysis.",

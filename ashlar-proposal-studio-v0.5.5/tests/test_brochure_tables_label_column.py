@@ -81,3 +81,31 @@ def test_shaded_empty_target_cell_is_labelled_not_plain_blank(tmp_path):
     assert ex.rows[0].evidence_type == "shaded_blank"
     assert "Shaded" in ex.rows[0].value
     assert ex.rows[1].evidence_type != "shaded_blank"
+
+
+def test_vertically_merged_filled_cell_gives_its_text_to_every_row(tmp_path):
+    """'Full Cover' printed once, centred in a tall shaded cell that spans several benefits."""
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=800)
+    y0 = 100
+    for x0, x1, t in [(32, 167, "Benefit"), (167, 232, "Silver"), (232, 297, "Gold Plus")]:
+        page.draw_rect(fitz.Rect(x0, y0, x1, y0 + 24), color=(0, 0, 0), width=0.8)
+        page.insert_text((x0 + 4, y0 + 15), t, fontsize=9)
+    top = y0 + 24
+    names = ["Surgery", "Hospital", "Intensive Care", "Anaesthetist"]
+    h = 40
+    for i, n in enumerate(names):
+        for x0, x1 in [(32, 50), (50, 167), (167, 232)]:
+            page.draw_rect(fitz.Rect(x0, top + i * h, x1, top + (i + 1) * h), color=(0, 0, 0), width=0.8)
+        page.insert_text((54, top + i * h + 20), n, fontsize=8)
+        page.insert_text((36, top + i * h + 20), str(i + 1), fontsize=8)
+        # per-row strips of the shaded column, no borders between them
+        page.draw_rect(fitz.Rect(232, top + i * h, 297, top + (i + 1) * h),
+                       color=None, fill=(0.58, 0.70, 0.85))
+    page.insert_text((245, top + 2 * h + 3), "Full Cover", fontsize=8)  # centre of the block
+    path = tmp_path / "m.pdf"
+    doc.save(str(path))
+    ex = extract_target_plan_from_pdf(path, "Gold Plus")
+    assert len(ex.rows) == 4
+    assert all(r.value == "Full Cover" for r in ex.rows), [r.value for r in ex.rows]
+    assert sum(r.evidence_type == "merged_cell" for r in ex.rows) >= 2  # the row holding the text reads it directly

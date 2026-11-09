@@ -212,6 +212,56 @@ def _shaded_empty(page: fitz.Page, rect: fitz.Rect) -> bool:
     return False
 
 
+def _filled_cell_text(page: fitz.Page, rect: fitz.Rect) -> str:
+    """Text of the filled block that contains `rect`, even when the block spans many rows.
+
+    Brochures merge a cell vertically ("Full Cover" once, centred, across eight
+    benefits). The text then sits outside this benefit's own y range, so the row
+    clip is empty although the cell is covered. Use the smallest filled shape that
+    covers the target column and the row's middle and read its whole text.
+    """
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return ""
+    mid = (rect.y0 + rect.y1) / 2
+    shapes = []
+    for d in drawings:
+        fill = d.get("fill")
+        if not fill or min(fill) > 0.97:
+            continue
+        r = fitz.Rect(d.get("rect", (0, 0, 0, 0)))
+        if r.is_empty or r.height > page.rect.height * 0.9:
+            continue
+        shapes.append((tuple(round(c, 2) for c in fill), r))
+    best = None
+    for fill, r in shapes:
+        if r.x0 <= rect.x0 + 3 and r.x1 >= rect.x1 - 3 and r.y0 <= mid <= r.y1:
+            if best is None or r.get_area() < best[1].get_area():
+                best = (fill, r)
+    if best is None:
+        return ""
+    fill, block = best
+    # The merged cell is often drawn as one filled strip per row. Join strips of the
+    # same colour and width that touch the block above and below.
+    same = [r for f, r in shapes if f == fill and abs(r.x0 - block.x0) <= 3 and abs(r.x1 - block.x1) <= 3]
+    block = fitz.Rect(block)
+    has_text = bool(_norm(page.get_text("text", clip=block)))
+    changed = True
+    while changed:
+        changed = False
+        for r in same:
+            if r.y1 >= block.y0 - 2 and r.y0 <= block.y1 + 2 and (r.y0 < block.y0 - 0.5 or r.y1 > block.y1 + 0.5):
+                # A second strip with its own text is a different cell, not a continuation.
+                own = bool(_norm(page.get_text("text", clip=r)))
+                if own and has_text:
+                    continue
+                block |= r
+                has_text = has_text or own
+                changed = True
+    return _norm(page.get_text("text", clip=block, sort=True))
+
+
 def _merged_value(page: fitz.Page, cells, target_rect: fitz.Rect, y0: float, y1: float) -> str:
     """Text of a merged cell that covers the target plan column within y0..y1."""
     width = target_rect.x1 - target_rect.x0
@@ -442,6 +492,11 @@ def extract_target_plan_from_pdf(
                         merged = _merged_value(page, table_cells, target_rect, y0, y1)
                         if merged:
                             value, evidence_type = _normalise_value(merged)
+                            evidence_type = "merged_cell"
+                    if not value:
+                        spanned = _filled_cell_text(page, target_rect)
+                        if spanned:
+                            value, evidence_type = _normalise_value(spanned)
                             evidence_type = "merged_cell"
                     if not value:
                         if _small_vector_icons(page, target_rect):

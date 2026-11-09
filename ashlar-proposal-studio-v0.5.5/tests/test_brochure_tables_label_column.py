@@ -109,3 +109,31 @@ def test_vertically_merged_filled_cell_gives_its_text_to_every_row(tmp_path):
     assert len(ex.rows) == 4
     assert all(r.value == "Full Cover" for r in ex.rows), [r.value for r in ex.rows]
     assert sum(r.evidence_type == "merged_cell" for r in ex.rows) >= 2  # the row holding the text reads it directly
+
+
+def test_borderless_table_rows_are_benefits_not_headings(tmp_path):
+    """Only horizontal rules: find_tables() sees one wide cell across the plan columns in
+    every body row. Those rows hold values and must not be skipped as headings."""
+    doc = fitz.open()
+    page = doc.new_page(width=800, height=600)
+    xs = [40, 220, 330, 440, 550]  # label, Bronze, Bronze Plus, Silver
+    y = 60
+    page.draw_rect(fitz.Rect(40, y, 660, y + 30), color=(0, 0, 0), width=0.8, fill=(0.9, 0.9, 0.9))
+    for x, t in zip(xs, ["BENEFIT", "BRONZE", "BRONZE PLUS", "SILVER"]):
+        page.insert_text((x + 4, y + 19), t, fontsize=10)
+    rows = [("Oncology", ["Covered", "EUR 2,000,000 limit", "Covered"]),
+            ("Psychiatric Illness", ["N/A", "Limited to 15 days", "30 days"]),
+            ("Physiotherapy", ["N/A", "10 visits", "20 visits"])]
+    y += 30
+    for label, vals in rows:
+        page.draw_line((40, y + 40), (660, y + 40), color=(0, 0, 0), width=0.8)
+        page.insert_text((44, y + 24), label, fontsize=9)
+        for x, v in zip(xs[1:], vals):
+            page.insert_text((x + 4, y + 24), v, fontsize=8)
+        y += 40
+    path = tmp_path / "b.pdf"
+    doc.save(str(path))
+    ex = extract_target_plan_from_pdf(path, "Bronze Plus")
+    got = {r.benefit: r.value for r in ex.rows}
+    assert "Oncology" in got and "2,000,000" in got["Oncology"]
+    assert "15 days" in got.get("Psychiatric Illness", "")

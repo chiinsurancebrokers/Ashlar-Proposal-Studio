@@ -104,11 +104,25 @@ class PlanTableExtraction:
         return "\n".join(lines)
 
 
+def _is_label_header(value: str | None) -> bool:
+    key = _norm_key(value)
+    return key in _LABEL_HEADERS or key.startswith(("benefit", "plan details"))
+
+
+def _squash(value: str | None) -> str:
+    """Case- and whitespace-insensitive key. PDF text extraction often drops the
+    space inside a wrapped header ("GoldPlus"), which must still match "Gold Plus"."""
+    return re.sub(r"\s+", "", value or "").casefold()
+
+
 def _find_target_header_index(headers: list[str], target_plan: str) -> int | None:
     target = _norm_key(target_plan)
     exact = [i for i, h in enumerate(headers) if _norm_key(h) == target]
     if exact:
         return exact[0]
+    squashed = [i for i, h in enumerate(headers) if _squash(h) == _squash(target_plan)]
+    if squashed:
+        return squashed[0]
 
     target_words = target.split()
     for i, h in enumerate(headers):
@@ -131,7 +145,7 @@ def _infer_label_index(page: fitz.Page, table, target_idx: int, start_row: int =
 
     header_names = [_norm(h) for h in table.header.names]
     for i in range(min(target_idx, len(header_names)) - 1, -1, -1):
-        if _norm_key(header_names[i]) in _LABEL_HEADERS:
+        if _is_label_header(header_names[i]):
             return i
 
     scores: list[tuple[int, int, int]] = []
@@ -173,17 +187,54 @@ def _small_vector_icons(page: fitz.Page, rect: fitz.Rect) -> list[fitz.Rect]:
     return icons
 
 
+def _shaded_empty(page: fitz.Page, rect: fitz.Rect) -> bool:
+    """True when a filled, non-white shape covers most of the (empty) cell.
+
+    Brochures often grey/blue-out cells that do not apply to a plan. That is a
+    different statement from a cell the author simply left blank.
+    """
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return False
+    inner = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x1 - 2, rect.y1 - 2)
+    if inner.is_empty:
+        return False
+    for d in drawings:
+        fill = d.get("fill")
+        if not fill or min(fill) > 0.97:
+            continue
+        r = fitz.Rect(d.get("rect", (0, 0, 0, 0)))
+        if r.is_empty:
+            continue
+        if (r & inner).get_area() >= 0.6 * inner.get_area():
+            return True
+    return False
+
+
+def _merged_value(page: fitz.Page, cells, target_rect: fitz.Rect, y0: float, y1: float) -> str:
+    """Text of a merged cell that covers the target plan column within y0..y1."""
+    width = target_rect.x1 - target_rect.x0
+    for cell in cells:
+        c = fitz.Rect(cell)
+        if c.x0 <= target_rect.x0 + 2 and c.x1 >= target_rect.x1 - 2 and (c.x1 - c.x0) > width * 1.2:
+            text = _norm(page.get_text("text", clip=fitz.Rect(c.x0, y0, c.x1, y1) & c, sort=True))
+            if text:
+                return text
+    return ""
+
+
 def _row_texts(page: fitz.Page, table_row) -> list[str]:
     return [_cell_text(page, c) for c in table_row.cells]
 
 
 def _detect_internal_plan_row(page: fitz.Page, table, target_plan: str) -> tuple[int, int] | None:
     """Return (row_index, target_column_index) when plan headings live inside the table body."""
-    target = _norm_key(target_plan)
+    target = _squash(target_plan)
     for row_index, row in enumerate(table.rows[:6]):
         texts = _row_texts(page, row)
         for col_index, text in enumerate(texts):
-            if _norm_key(text) == target:
+            if _squash(text) == target:
                 return row_index, col_index
     return None
 
@@ -242,7 +293,7 @@ def extract_target_plan_from_pdf(
                         label_cell = table.header.cells[label_idx]
                         label_x = (label_cell[0], label_cell[2])
                     section_candidate = headers[label_idx] if label_idx is not None and label_idx < len(headers) else ""
-                    if section_candidate and _norm_key(section_candidate) not in _LABEL_HEADERS:
+                    if section_candidate and not _is_label_header(section_candidate):
                         current_section = section_candidate
                 else:
                     internal = _detect_internal_plan_row(page, table, target_plan)
@@ -306,19 +357,38 @@ def extract_target_plan_from_pdf(
                 tx0, tx1 = target_x
                 lx0, lx1 = label_x
 
+                # A benefit often spans several physical rows: the PDF wraps one cell
+                # over many lines, and find_tables() splits each line into a row. A
+                # row starts a new benefit only when it has a cell in the label
+                # column; rows without one continue the benefit above. The text is
+                # then read once from the union of the benefit's rows, so a wrapped
+                # cell is not repeated and not cut into pieces of words.
+                header_bottom = max(
+                    (c[3] for c in (table.header.cells if header_source == "table_header" else table.rows[start_row - 1].cells) if c),
+                    default=0,
+                )
+                open_record: dict | None = None
+                table_records: list[dict] = []
+
+                def _close(record: dict | None, y: float) -> None:
+                    if record is not None and record.get("y1") is None:
+                        record["y1"] = y
+
                 for table_row in table.rows[start_row:]:
                     first_cell = next((c for c in table_row.cells if c), None)
                     if first_cell is None:
                         continue
                     y0, y1 = first_cell[1], first_cell[3]
+                    if y0 < header_bottom - 1:
+                        continue  # a wrapped heading's second line, not a benefit
 
-                    label_rect = fitz.Rect(lx0, y0, lx1, y1)
-                    target_rect = fitz.Rect(tx0, y0, tx1, y1)
-                    label = _norm(page.get_text("text", clip=label_rect, sort=True))
-                    raw_value = _norm(page.get_text("text", clip=target_rect, sort=True))
-                    value, evidence_type = _normalise_value(raw_value)
+                    starts_benefit = first_cell[0] <= lx0 + 25
+                    spans_row = any(c and c[0] < tx0 - 10 and c[2] >= tx1 - 1 for c in table_row.cells)
 
-                    if not label:
+                    if spans_row:
+                        # A heading or note across the whole table, not a benefit.
+                        _close(open_record, y0)
+                        open_record = None
                         full_row = _norm(
                             page.get_text(
                                 "text",
@@ -326,15 +396,60 @@ def extract_target_plan_from_pdf(
                                 sort=True,
                             )
                         )
-                        if full_row and len(full_row) <= 180:
+                        if full_row and len(full_row) <= 180 and not full_row.startswith(("\u201c", '"')):
                             current_section = full_row
                         continue
 
+                    if not starts_benefit:
+                        # Continues the benefit above. The extent of a benefit is set
+                        # by where the next one starts, not by these rows: a tall
+                        # merged cell in another plan's column can span several
+                        # benefits and must not stretch this one.
+                        continue
+
+                    # The label may sit beside a narrow enumerator cell ("1", "A").
+                    label_x0 = lx0
+                    cells = table_row.cells
+                    if len(cells) > 1 and cells[0] and cells[1] and (cells[0][2] - cells[0][0]) < 40 and cells[1][0] >= cells[0][2] - 1:
+                        label_x0 = cells[1][0]
+                    _close(open_record, y0)
+                    open_record = {
+                        "section": current_section,
+                        "label_x0": label_x0,
+                        "y0": y0,
+                        "y1": None,
+                    }
+                    table_records.append(open_record)
+                _close(open_record, table.bbox[3])
+
+                table_cells = [c for tr in table.rows for c in tr.cells if c]
+
+                for record in table_records:
+                    y0, y1 = record["y0"], record["y1"]
+                    label_rect = fitz.Rect(record["label_x0"], y0, lx1, y1)
+                    target_rect = fitz.Rect(tx0, y0, tx1, y1)
+                    label = _norm(page.get_text("text", clip=label_rect, sort=True))
+                    if not label:
+                        continue
+                    value, evidence_type = _normalise_value(
+                        _norm(page.get_text("text", clip=target_rect, sort=True))
+                    )
                     if not value:
-                        icons = _small_vector_icons(page, target_rect)
-                        if icons:
+                        # One cell often spans several plan columns ("Full Cover" across
+                        # Silver to Platinum). Its text sits in the middle of the merged
+                        # cell, outside the target column's own x range, so a blank here
+                        # is not yet a blank cell.
+                        merged = _merged_value(page, table_cells, target_rect, y0, y1)
+                        if merged:
+                            value, evidence_type = _normalise_value(merged)
+                            evidence_type = "merged_cell"
+                    if not value:
+                        if _small_vector_icons(page, target_rect):
                             value = "Covered (table checkmark)"
                             evidence_type = "vector_checkmark"
+                        elif _shaded_empty(page, target_rect):
+                            value = "Shaded cell with no value (not stated as covered; confirm table legend)"
+                            evidence_type = "shaded_blank"
                         else:
                             value = "Not stated / blank cell"
                             evidence_type = "blank"
@@ -343,7 +458,7 @@ def extract_target_plan_from_pdf(
                         PlanTableRow(
                             page=page_number,
                             table_index=table_index,
-                            section=current_section,
+                            section=record["section"],
                             benefit=label,
                             value=value,
                             target_plan=target_plan,

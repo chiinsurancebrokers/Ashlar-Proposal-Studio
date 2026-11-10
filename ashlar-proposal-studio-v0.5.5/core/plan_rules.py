@@ -250,11 +250,16 @@ def localise_access_rows(results: list[dict], client_profile: str) -> list[dict]
     return out
 
 
-def apply_access_rules(result: dict, plan_text: str) -> dict:
-    """Store the rules and put them at the top of the plan's critical limitations."""
+def apply_access_rules(result: dict, plan_text: str, quotation_text: str = "") -> dict:
+    """Store the rules and put them at the top of the plan's critical limitations.
+
+    ``quotation_text`` is only used to check that a figure exists in the documents
+    (some carriers, e.g. Now Health, state evacuation limits on the quote itself);
+    access rules are still read from the plan documents alone.
+    """
     normalise_inpatient_scope(result, plan_text)
     drop_contradicted_limitations(result)
-    ground_benefit_amounts(result, plan_text)
+    ground_benefit_amounts(result, "\n\n".join(t for t in (plan_text, quotation_text) if t))
     ground_shared_limits(result, plan_text)
     rules = extract_access_rules(plan_text)
     if not rules:

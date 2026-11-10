@@ -46,3 +46,16 @@ def test_missing_frequency_is_flagged():
     f = now_health_quote_facts(QUOTE.replace("Payment frequency: Month\n", ""))
     assert f["premium"]["frequency"] == "Annual"
     assert any("frequency" in w.lower() for w in f["fact_warnings"])
+
+
+def test_evacuation_figures_stated_only_on_the_quote_are_not_removed():
+    from core.plan_rules import apply_access_rules
+    quote = (
+        "Evacuation and Repatriation\nCombined limit of EUR 80,000.\n"
+        "Non-hospital accommodation is EUR 160 per day, up to EUR 6,000 per person per evacuation.\n"
+    )
+    detail = "Combined evacuation limit of EUR 80,000. Non-hospital accommodation is EUR 160 per day, up to EUR 6,000 per person per evacuation."
+    result = {"critical_limitations": [{"topic": "Evacuation and repatriation", "detail": detail}], "benefits": {}}
+    out = apply_access_rules(result, "Brochure text with no figures.", quote)
+    assert any(i.get("topic") == "Evacuation and repatriation" for i in out["critical_limitations"])
+    assert not any("Removed limitation" in w for w in out.get("extraction_warnings", []))

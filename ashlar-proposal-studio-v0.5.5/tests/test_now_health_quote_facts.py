@@ -46,3 +46,27 @@ def test_missing_frequency_is_flagged():
     f = now_health_quote_facts(QUOTE.replace("Payment frequency: Month\n", ""))
     assert f["premium"]["frequency"] == "Annual"
     assert any("frequency" in w.lower() for w in f["fact_warnings"])
+
+
+INLINE = """Area of Coverage Selected: Europe
+Payment frequency: Month
+Final Total Premium: EUR 202.08
+In/Day-Patient Annual EUR 400 Deductible
+Region of Cover: Worldwide Excluding USA
+"""
+
+
+def test_inline_selected_area_beats_options_table():
+    f = now_health_quote_facts(INLINE)
+    assert f["area_of_cover"] == "Europe"
+
+
+def test_worldwide_selection_is_still_read():
+    f = now_health_quote_facts(QUOTE.replace("\nEurope\nSimpleCare Europe", "\nWorldwide Excluding USA\nSimpleCare Comprehensive"))
+    assert f["area_of_cover"] == "Worldwide Excluding USA"
+
+
+def test_unknown_selection_is_not_defaulted_to_worldwide():
+    f = now_health_quote_facts("Final Total Premium: EUR 202.08\nRegion of Cover: Worldwide Excluding USA\n")
+    assert "area_of_cover" not in f
+    assert any("area of cover" in w.lower() for w in f["fact_warnings"])

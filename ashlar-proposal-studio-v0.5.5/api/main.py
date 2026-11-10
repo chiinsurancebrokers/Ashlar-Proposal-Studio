@@ -4,6 +4,7 @@ import os
 import tempfile
 import httpx
 from pathlib import Path
+import hmac
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
@@ -68,14 +69,19 @@ async def _policy_analyzer_enrich(provider_label: str, target_plan: str, quotati
     except Exception as exc: return {"bridge_warning": f"Policy Analyzer unavailable: {type(exc).__name__}"}
 
 
+def _key_matches(expected: str, given: str | None) -> bool:
+    """Constant-time comparison that FAILS CLOSED when no key is configured."""
+    return bool(expected) and hmac.compare_digest(expected.encode(), (given or "").encode())
+
+
 def require_internal_key(x_ashlar_api_key: str | None = Header(default=None)) -> None:
     expected = os.getenv("ASHLAR_INTERNAL_API_KEY", "").strip()
-    if expected and x_ashlar_api_key != expected: raise HTTPException(status_code=401, detail="Invalid internal API key")
+    if not _key_matches(expected, x_ashlar_api_key): raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
 def require_hal_bridge_key(x_hal_bridge_key: str | None = Header(default=None)) -> None:
     expected = os.getenv("HAL_BRIDGE_API_KEY", "").strip()
-    if not expected or x_hal_bridge_key != expected: raise HTTPException(status_code=401, detail="Invalid HAL bridge key")
+    if not _key_matches(expected, x_hal_bridge_key): raise HTTPException(status_code=401, detail="Invalid HAL bridge key")
 
 
 class CaseJobRequest(BaseModel): case_id: str = Field(min_length=1)

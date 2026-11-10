@@ -125,7 +125,7 @@ ASHLAR_WORKER_POLL_SECONDS=1.5
 - `POST /api/v1/jobs/chat`
 - `GET /api/v1/jobs/{job_id}`
 
-If `ASHLAR_INTERNAL_API_KEY` is configured, all `/api/v1/*` routes require it via `x-ashlar-api-key`.
+`ASHLAR_INTERNAL_API_KEY` is REQUIRED: all `/api/v1/jobs/*` routes return 401 when it is unset or wrong via `x-ashlar-api-key`.
 
 ## Safe fallback
 

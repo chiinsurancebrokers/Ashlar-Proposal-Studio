@@ -261,3 +261,35 @@ def reanalysis_inputs(result: dict) -> dict:
         "target_override": target_override or "",
         "underwriting_override": result.get("underwriting_override") or "",
     }
+
+
+def _option_key(result: dict) -> str:
+    a = result.get("analysis") or {}
+    insurer = re.split(r"\W+", str(a.get("provider") or result.get("provider") or "").strip().casefold())[0]
+    plan = str(result.get("target_plan") or a.get("plan_name") or "").casefold()
+    return f"{insurer}|{re.sub(r'[^a-z0-9]+', ' ', plan).strip()}"
+
+
+def carry_over_manual_overrides(old_results: list[dict], new_results: list[dict]) -> list[dict]:
+    """Re-analysing a case must not throw away what a broker already corrected.
+
+    Fields listed under ``manual_overrides`` are copied from the previous result of
+    the same option (same insurer and selected plan) onto the fresh one. Everything
+    the broker did not touch is taken from the new analysis, so extraction fixes still apply.
+    """
+    previous: dict[str, list[dict]] = {}
+    for old in old_results or []:
+        if (old.get("analysis") or {}).get("manual_overrides"):
+            previous.setdefault(_option_key(old), []).append(old)
+    for new in new_results or []:
+        matches = previous.get(_option_key(new))
+        if not matches:
+            continue
+        old_analysis = matches.pop(0).get("analysis") or {}
+        analysis = new.setdefault("analysis", {})
+        fields = [f for f in old_analysis.get("manual_overrides") or [] if f in old_analysis]
+        for field in fields:
+            analysis[field] = old_analysis[field]
+        if fields:
+            analysis["manual_overrides"] = sorted(fields)
+    return new_results

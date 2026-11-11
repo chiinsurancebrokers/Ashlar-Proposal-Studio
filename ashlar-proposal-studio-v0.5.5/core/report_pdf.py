@@ -11,6 +11,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.graphics.shapes import Drawing, Rect
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
@@ -18,6 +19,7 @@ from reportlab.platypus import (
     PageBreak, KeepTogether,
 )
 
+from .claim_cost import claim_cost_view
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative, coverage_scope_note
 from .household import REL_GREEK
 from .report_labels import all_labels as _labels, category_label, topic_label
@@ -323,6 +325,30 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
         ]], colWidths=[55*mm, 125*mm, 70*mm])
         card.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), WHITE), ("BOX", (0,0), (-1,-1), .4, BORDER), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 6), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
         story += [card, Spacer(1, 2.5*mm)]
+    cost = claim_cost_view(results, lab)
+    if cost:
+        story += [PageBreak(), _p(lab["cost_title"], H1), _p(lab["cost_intro"], Body), Spacer(1, 2*mm)]
+        data = [[_p(lab[k], Small) for k in ("cost_col_plan", "cost_col_premium", "cost_col_deductible", "cost_col_total", "cost_col_note")]]
+        TotalStyle = ParagraphStyle("CostTotal", parent=Body, fontSize=11.5, leading=14, spaceAfter=0)
+        BAR_W = 52 * mm
+        for r in cost["rows"]:
+            # Dark bar = premium, light bar = deductible, same scale on every row.
+            bars = Drawing(BAR_W, 6 * mm)
+            wp, wd = BAR_W * r["w_prem"] / 100, BAR_W * r["w_ded"] / 100
+            bars.add(Rect(0, 3.2 * mm, wp, 2.2 * mm, fillColor=INK, strokeColor=None))
+            bars.add(Rect(0, 0.6 * mm, wd, 2.2 * mm, fillColor=BORDER, strokeColor=None))
+            data.append([[_p(r["name"], Body), bars], _p(r["premium"], Body), _p(r["deductible"], Body),
+                         _p(r["total"], TotalStyle), _p(r["note"], Small)])
+        grid = Table(data, colWidths=[62*mm, 36*mm, 30*mm, 42*mm, 80*mm], repeatRows=1)
+        grid.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), NAVY), ("TEXTCOLOR", (0,0), (-1,0), WHITE),
+            ("GRID", (0,0), (-1,-1), .3, BORDER), ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 5), ("RIGHTPADDING", (0,0), (-1,-1), 5),
+            ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+        ]))
+        for i in range(2, len(data), 2):
+            grid.setStyle(TableStyle([("BACKGROUND", (0,i), (-1,i), LIGHT)]))
+        story += [grid, Spacer(1, 3*mm), _p(cost["ranking"], Body), Spacer(1, 1.5*mm), _p(lab["cost_caveat"], Small)]
     story += [PageBreak(), _p(lab["assessment"], H1)]
     ass = client_analysis.get("ashlar_assessment") or {}
     story += [_p(ass.get("headline") or lab["our_view"], ParagraphStyle("AHead", parent=H2, fontSize=16.5, leading=21, textColor=PURPLE))]

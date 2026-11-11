@@ -462,7 +462,7 @@ def analyze_target_plan(
             result, provider_label, quotation_text, focused_table_context, target_plan
         )
         # Network / prior-approval rules come from the full plan documents.
-        result = apply_access_rules(result, "\n\n".join([brochure_text or "", wording_text or ""]))
+        result = apply_access_rules(result, "\n\n".join([brochure_text or "", wording_text or ""]), quotation_text or "")
         result.setdefault("provider", provider_label)
         result.setdefault("plan_name", target_plan or quote.get("quoted_plan") or None)
         result.setdefault("target_plan_found", bool(target_plan or quote.get("quoted_plan") or focused_table_context))

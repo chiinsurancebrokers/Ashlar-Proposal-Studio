@@ -161,6 +161,23 @@ _BARE_NUMBER = re.compile(r"\b\d[\d,.]{2,}\b")
 
 
 def classify(text) -> str:
+    """The state this cell describes, never "covered" when the benefit is restricted.
+
+    A cell that opens by saying the benefit is not covered, or that it is covered
+    "only" for something narrow, and then names an exception ("Not covered ... Exception:
+    accident-related dental treatment is paid in full") has cover with a condition. The
+    plain amount or "paid in full" in the exception is not a reason to show the benefit
+    as fully covered, so it is capped at the sub-limit state.
+    """
+    state = _classify(text)
+    if state == COVERED:
+        lead = _norm(_lead(_norm(text)))
+        if any(term in lead for term in _NOT_COVERED) or re.search(r"\bonly\b", lead):
+            return SUB_LIMIT
+    return state
+
+
+def _classify(text) -> str:
     """Return the state this cell describes.
 
     Order matters. "Not covered" wins over everything, because a cell that

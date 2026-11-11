@@ -31,7 +31,7 @@ from core.email_delivery import EmailDeliveryError, email_delivery_configured, e
 from core.extract import extract_document
 from core.library_classify import canonical_name, guess_doc_type, product_mismatch, table_first
 from core.household import RELATIONSHIPS, SEXES, applicant_details, applicant_row, maternity_marked_irrelevant, normalise_members
-from core.case_runner import analyze_option, disambiguate_plan_names
+from core.case_runner import analyze_option, carry_over_manual_overrides, disambiguate_plan_names, reanalysis_inputs
 from core.plan_selector import identify_selected_plan
 from core.quality import assess_result_quality, case_quality
 from core.carriers import get_carrier_adapter
@@ -883,6 +883,42 @@ def _restore_case_to_session(row: dict) -> None:
     st.session_state["client_analysis"] = row.get("client_analysis_json")
     st.session_state["n_providers"] = max(1, int(row.get("provider_count") or len(st.session_state["results"]) or 1))
     st.session_state["loaded_case_snapshot"] = True
+
+
+def _render_reanalyse_saved_case() -> None:
+    """Re-run extraction on a reopened case from the quote text saved with it."""
+    results = st.session_state.get("results") or []
+    if not results:
+        return
+    reusable = [r for r in results if (r.get("quotation_text") or "").strip()]
+    if not reusable:
+        st.caption("This case was saved before quote text was kept, so it can only be re-analysed by uploading the quotes again.")
+        return
+    if not st.button("Re-analyze from saved quotes", key="reanalyse_saved_case"):
+        return
+    updated, kept = [], []
+    progress = st.progress(0.0, text="Re-analyzing saved quotes…")
+    for idx, old in enumerate(results, start=1):
+        # A manually uploaded brochure/wording is not stored, so re-running such an option
+        # would lose its evidence. Keep it as it is rather than make it worse.
+        if not (old.get("quotation_text") or "").strip() or not old.get("library_source"):
+            updated.append(old)
+            kept.append(str(old.get("provider") or f"Option {idx}"))
+        else:
+            progress.progress((idx - 1) / len(results), text=f"Analyzing {old.get('provider') or idx}…")
+            new_row, warnings = analyze_option(**reanalysis_inputs(old))
+            for warning in warnings:
+                st.warning(warning)
+            updated.append(new_row)
+    updated = carry_over_manual_overrides(results, updated)
+    st.session_state["results"] = disambiguate_plan_names(updated)
+    st.session_state["client_analysis"] = None
+    progress.empty()
+    if kept:
+        st.session_state["reanalyse_note"] = "Not re-analyzed (manual documents were not saved): " + ", ".join(kept)
+    if st.session_state.get("current_case_id"):
+        _persist_current_case(silent=True, status="analyzed")
+    st.rerun()
 
 
 def saved_cases_page() -> None:
@@ -1937,8 +1973,12 @@ def case_workspace_page() -> None:
     if st.session_state.get("loaded_case_snapshot"):
         st.info(
             "Loaded from Saved Cases. The structured analysis, evidence, HAL chat and client report were restored. "
-            "Original quote uploads are not rehydrated in this version; add fresh files only if you want to re-analyze the case."
+            "Original quote uploads are not rehydrated, but each option's quote text is saved, so you can re-analyze below without uploading anything. "
+            "Your manual corrections are kept."
         )
+        _render_reanalyse_saved_case()
+        if st.session_state.get("reanalyse_note"):
+            st.warning(st.session_state.pop("reanalyse_note"))
 
     with st.container(border=True):
         h1, h2 = st.columns([1.5, .5])
@@ -2211,8 +2251,10 @@ def case_workspace_page() -> None:
                 all_results.append(result_row)
                 progress.progress(idx / len(active), text=f"Completed {slot['label']}")
 
+            # Keep what the broker already corrected (premium frequency, deductible scope, ...)
+            # and the HAL conversation, so a re-run applies extraction fixes without starting over.
+            all_results = carry_over_manual_overrides(st.session_state.get("results") or [], all_results)
             st.session_state["results"] = disambiguate_plan_names(all_results)
-            st.session_state["case_chat"] = []
             st.session_state["client_analysis"] = None
             st.session_state["loaded_case_snapshot"] = False
             # An analyzed case with an identifying reference/name is automatically

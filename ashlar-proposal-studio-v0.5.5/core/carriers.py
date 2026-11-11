@@ -408,6 +408,26 @@ def bupa_quote_facts(text: str) -> dict:
 _NOW_HEALTH_FREQUENCY = {"mont": "Monthly", "quar": "Quarterly", "semi": "Semi-annual", "half": "Semi-annual", "annu": "Annual", "year": "Annual"}
 
 
+_NOW_HEALTH_AREA = r"Europe|Worldwide(?:\s+(?:Excluding|Excl\.?|Including|Incl\.?)\s+(?:the\s+)?(?:USA|U\.S\.?A?\.?))?"
+
+
+def _now_health_selected_area(text: str) -> str | None:
+    """The area the applicant actually selected, never the options table."""
+    m = re.search(rf"Area\s+of\s+Coverage?\s+Selected\s*:\s*(?P<area>{_NOW_HEALTH_AREA})\b", text, flags=re.IGNORECASE)
+    if not m:
+        # PDF text order: all labels first, then values "<country> / <area> / <network>".
+        m = re.search(
+            rf"\n\s*(?P<area>{_NOW_HEALTH_AREA})\s*\n\s*SimpleCare\s+(?:Europe|Comprehensive)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    if not m:
+        return None
+    area = re.sub(r"\s+", " ", m.group("area")).strip().title()
+    area = re.sub(r"U\.?S\.?A?\.?$", "USA", area, flags=re.IGNORECASE).replace("Excl.", "Excluding").replace("Incl.", "Including")
+    return area.replace("Usa", "USA")
+
+
 def now_health_quote_facts(text: str) -> dict:
     facts = generic_quote_facts(text)
     if not text:
@@ -431,6 +451,21 @@ def now_health_quote_facts(text: str) -> dict:
             frequency = "Annual"
         facts["premium"] = {"amount": canonical_amount(premium.group("amt")), "currency": _currency_code(premium.group("cur")), "frequency": frequency}
         facts["quote_currency"] = facts["premium"]["currency"]
+
+    # The generic extractor picks "Worldwide Excluding USA" up from the quote's options
+    # table ("Region of Cover: ..."), which lists what is available, not what was chosen.
+    # Only the selected area counts, so discard the generic guess and read it explicitly.
+    generic_area = facts.pop("area_of_cover", None)
+    area = _now_health_selected_area(text)
+    has_options_table = re.search(r"Regional?\s+Cover|Region\s+of\s+Cover|Area\s+of\s+Coverage?\s+Selected", text, flags=re.IGNORECASE)
+    if area:
+        facts["area_of_cover"] = area
+    elif generic_area and not has_options_table:
+        facts["area_of_cover"] = generic_area
+    else:
+        facts.setdefault("fact_warnings", []).append(
+            "Selected area of cover not found on the Now Health quotation; check it and correct it manually."
+        )
 
     uw = re.search(r"Underwriting\s+Basis\s*:\s*(?P<uw>[^\n\r]+)", text, flags=re.IGNORECASE)
     if uw:
@@ -458,7 +493,6 @@ def now_health_quote_facts(text: str) -> dict:
         )
         if block:
             deductible = block
-            facts["area_of_cover"] = re.sub(r"\s+", " ", block.group("area")).strip().title().replace("Usa", "USA")
             facts["network"] = re.sub(r"\s+", " ", block.group("network")).strip()
     if deductible:
         phrase = (

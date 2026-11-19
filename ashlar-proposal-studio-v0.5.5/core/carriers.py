@@ -529,9 +529,11 @@ def now_health_quote_facts(text: str) -> dict:
     if dental:
         hints["dental"] = f"Dental care up to €{dental.group('amt')}, subject to 20% co-insurance and the stated waiting period/exclusions."
     if facts.get("annual_limit"):
-        hints["inpatient"] = f"In/day-patient cover is included under SimpleCare 250 within the {facts['annual_limit']} overall plan maximum; see the quoted benefit schedule for sub-limits."
+        # Name the plan the quote actually selects; never a fixed plan name.
+        plan_name = facts.get("quoted_plan") or "the quoted plan"
+        hints["inpatient"] = f"In/day-patient cover is included under {plan_name} within the {facts['annual_limit']} overall plan maximum; see the quoted benefit schedule for sub-limits."
 
-    # SimpleCare 250 does not include a separate wellness/preventive benefit. The quote's
+    # The quoted SimpleCare plan has no separate wellness/preventive benefit. The quote's
     # exclusions explicitly list routine examinations and health screening, except where a
     # benefit is specifically stated in the schedule. Surface that as a deterministic fact
     # rather than allowing the LLM to weaken it to "Not mentioned".

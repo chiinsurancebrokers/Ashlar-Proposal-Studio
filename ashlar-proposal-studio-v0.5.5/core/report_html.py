@@ -32,6 +32,8 @@ from __future__ import annotations
 from datetime import date
 from html import escape
 
+from .report_bars import OUTPATIENT_TOPIC, PREMIUM_TOPIC, outpatient_bars, premium_bars
+from .report_visuals import BAND_CSS, photo_band
 from .benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT, UNKNOWN
 from .benefit_state import mark as benefit_mark
 from .claim_cost import claim_cost_view
@@ -170,6 +172,8 @@ li{margin:0 0 6px}
 .cost th{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; background:var(--ink); color:var(--paper-fine)}
 .cost td.num{white-space:nowrap; font-variant-numeric:tabular-nums}
 .cost td.total{font-family:var(--display); font-size:18px}
+.compare .cbar{display:block; height:6px; background:var(--ink); margin-top:7px; max-width:100%}
+.compare .bar-note{display:block; font-size:12px; color:var(--muted); margin-top:3px}
 .cost .bar{display:block; height:8px; background:var(--ink); margin-top:6px}
 .cost .bar.light{background:var(--mortar); margin-top:0}
 .cost tr{break-inside:avoid}
@@ -326,7 +330,18 @@ def _mark_html(cell: dict, lab: dict) -> str:
     )
 
 
-def _row_cells(row: dict, names: list[str], lab: dict) -> str:
+def _bar_html(info: dict | None, lab: dict) -> str:
+    """A thin bar under a comparison figure; a yearly total sits beside a monthly quote."""
+    if not info:
+        return ""
+    extra = ""
+    if info.get("factor", 1) and info.get("factor", 1) > 1:
+        extra = (f"<span class='bar-note'>≈ {_e(info.get('currency'))} {info['annual']:,.2f} "
+                 f"{_e(lab['per_year'])}</span>")
+    return f"{extra}<span class='cbar' style='width:{int(info['pct'])}%' aria-hidden='true'></span>"
+
+
+def _row_cells(row: dict, names: list[str], lab: dict, bars: dict | None = None) -> str:
     """The cells of one comparison row.
 
     `marks` is read when the matrix supplied it and recomputed from the text
@@ -339,11 +354,12 @@ def _row_cells(row: dict, names: list[str], lab: dict) -> str:
     out = []
     for name in names:
         raw = values.get(name)
+        bar = _bar_html((bars or {}).get(name), lab)
         if not is_benefit:
-            out.append(f"<td>{_e(raw) or _e(lab['mark_unknown'])}</td>")
+            out.append(f"<td>{_e(raw) or _e(lab['mark_unknown'])}{bar}</td>")
             continue
         cell = marks.get(name) or benefit_mark(raw)
-        out.append(f"<td>{_mark_html(cell, lab)}</td>")
+        out.append(f"<td>{_mark_html(cell, lab)}{bar}</td>")
     return "".join(out)
 
 
@@ -353,7 +369,7 @@ def _comparison(client_analysis: dict, results: list[dict], lab: dict, language:
         return ""
     names = [plan_display_name(r) for r in results]
     head = "".join(f"<th scope='col'>{_e(n)}</th>" for n in names)
-    body, seen_category = [], None
+    body, seen_category, any_bars = [], None, False
     for row in matrix:
         category = str(row.get("category") or "").strip()
         if category and category != seen_category:
@@ -362,9 +378,19 @@ def _comparison(client_analysis: dict, results: list[dict], lab: dict, language:
                 f'<tr class="band"><th scope="rowgroup" colspan="{len(names) + 1}">'
                 f"{_e(category_label(category, language))}</th></tr>"
             )
+        topic = str(row.get("topic") or "").strip().casefold()
+        row_bars = None
+        if topic == PREMIUM_TOPIC:
+            row_bars = premium_bars(results, names)
+        elif topic == OUTPATIENT_TOPIC:
+            states = {n: ((row.get("marks") or {}).get(n) or benefit_mark((row.get("values") or {}).get(n))).get("state")
+                      for n in names}
+            row_bars = outpatient_bars(row.get("values") or {}, states)
+        if row_bars:
+            any_bars = True
         body.append(
             f'<tr><th scope="row">{_e(topic_label(row.get("topic"), language))}</th>'
-            f"{_row_cells(row, names, lab)}</tr>"
+            f"{_row_cells(row, names, lab, row_bars)}</tr>"
         )
     key = "".join(
         f'<div><span class="mark m-{state}">'
@@ -376,6 +402,7 @@ def _comparison(client_analysis: dict, results: list[dict], lab: dict, language:
         "<section id='comparison'><div class='wrap'>"
         f"<h2>{_e(lab['compare'])}</h2>"
         f"{_p(lab['compare_note'], 'prose muted')}"
+        f"{_p(lab['bars_note'], 'prose muted') if any_bars else ''}"
         f"<p class='eyebrow'>{_e(lab['marks_key'])}</p>"
         f"<div class='key' style='margin:0 0 18px'>{key}</div>"
         "<div class='scroller'><table class='compare'>"
@@ -666,14 +693,18 @@ def build_html(
     title = _e(client_analysis.get("report_title")) or "Ashlar Insurance Comparative Analysis"
     body = "".join([
         _masthead(client_analysis, results, lab, language),
+        photo_band("hero", language),
         # Scope before price: this strip sits above the first premium on the page.
         _scope_strip(client_analysis, results, lab, language),
         _context(client_analysis, lab),
+        photo_band("area", language),
         _plans(client_analysis, results, lab),
         _comparison(client_analysis, results, lab, language),
         _differences(client_analysis, lab),
         _claim_costs(results, lab),
+        photo_band("care", language),
         _recommendation(client_analysis, lab),
+        photo_band("advice", language),
         _next_steps(client_analysis, lab),
         _sources(source_documents, lab),
         _footer(client_analysis, lab),
@@ -689,7 +720,7 @@ def build_html(
         '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
         f'<link rel="stylesheet" href="{FONTS_HREF}">\n'
-        f"<style>{CSS}</style>\n</head>\n"
+        f"<style>{CSS}{BAND_CSS}</style>\n</head>\n"
         f"<body>{body}</body>\n</html>\n"
     )
 

@@ -32,6 +32,13 @@ PHOTOS: dict[str, tuple[str, str]] = {
     ),
 }
 
+ALT_EL: dict[str, str] = {
+    "hero": "Μια οικογένεια παίρνει πρωινό μαζί σε ηλιόλουστη βεράντα",
+    "area": "Ένας ταξιδιώτης κοιτάζει το λιμάνι την ώρα του ηλιοβασιλέματος",
+    "care": "Ένα ζευγάρι μιλά με τον γιατρό του",
+    "advice": "Ένας σύμβουλος εξετάζει μαζί με μια οικογένεια τα έγγραφα της ασφάλισης",
+}
+
 BAND_CSS = """
 .band{margin:0; border-top:1px solid var(--mortar); background:var(--paper-fine); line-height:0}
 .band img{display:block; width:100%; max-height:clamp(150px,26vw,340px); object-fit:cover; object-position:50% 38%}
@@ -43,7 +50,7 @@ def enabled() -> bool:
     return os.environ.get("REPORT_PHOTOS", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
-def photo_band(slot: str) -> str:
+def photo_band(slot: str, language: str = "English") -> str:
     """One full-width photo band, or an empty string when photos are off.
 
     A photo that fails to load removes itself, so a missing image never leaves
@@ -51,6 +58,9 @@ def photo_band(slot: str) -> str:
     if not enabled() or slot not in PHOTOS:
         return ""
     url, alt = PHOTOS[slot]
+    key = str(language).lower()
+    if key.startswith(("gr", "el")) or "greek" in key:
+        alt = ALT_EL.get(slot, alt)
     return (
         "<figure class='band'>"
         f"<img src='{escape(url, quote=True)}' alt='{escape(alt, quote=True)}' "

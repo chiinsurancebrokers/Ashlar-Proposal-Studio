@@ -32,6 +32,7 @@ from __future__ import annotations
 from datetime import date
 from html import escape
 
+from .report_visuals import BAND_CSS, photo_band
 from .benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT, UNKNOWN
 from .benefit_state import mark as benefit_mark
 from .claim_cost import claim_cost_view
@@ -666,14 +667,18 @@ def build_html(
     title = _e(client_analysis.get("report_title")) or "Ashlar Insurance Comparative Analysis"
     body = "".join([
         _masthead(client_analysis, results, lab, language),
+        photo_band("hero"),
         # Scope before price: this strip sits above the first premium on the page.
         _scope_strip(client_analysis, results, lab, language),
         _context(client_analysis, lab),
+        photo_band("area"),
         _plans(client_analysis, results, lab),
         _comparison(client_analysis, results, lab, language),
         _differences(client_analysis, lab),
         _claim_costs(results, lab),
+        photo_band("care"),
         _recommendation(client_analysis, lab),
+        photo_band("advice"),
         _next_steps(client_analysis, lab),
         _sources(source_documents, lab),
         _footer(client_analysis, lab),
@@ -689,7 +694,7 @@ def build_html(
         '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
         f'<link rel="stylesheet" href="{FONTS_HREF}">\n'
-        f"<style>{CSS}</style>\n</head>\n"
+        f"<style>{CSS}{BAND_CSS}</style>\n</head>\n"
         f"<body>{body}</body>\n</html>\n"
     )
 

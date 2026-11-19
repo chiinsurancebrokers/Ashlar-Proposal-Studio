@@ -43,6 +43,11 @@ NON-NEGOTIABLE RULES:
 - Keep diagnostics/advanced imaging separate from preventive or wellness benefits. MRI, CT and PET are diagnostic imaging, not wellness benefits.
 - A visit or consultation limit applies to each benefit separately unless the document says it is shared, combined or in total. Summary documents (IPID, key facts) that list several benefits after one number are listing per-benefit limits.
 - A providers/hospital list that names hospitals country by country restricts only the countries it lists; do not tell the client to verify hospitals in a country the list does not mention.
+- Area of cover: use the area the applicant's quote says was selected. A brochure may also list a narrower regional option (for example "Europe excluding the United Kingdom, Germany and Switzerland"). Do not turn that option's exclusions into limitations unless the quote selected that option.
+- If the document shows a benefit or limit as "N/A" or "Not covered" for the target plan, do not write a cap, sub-limit or visit allowance for it. Never carry a figure over from a different plan or tier.
+- Exclusions: if the document lists a condition (for example pregnancy or maternity) under what is not covered, say it is excluded. Do not add "unless shown on the certificate" or any other exception the document does not state.
+- Premium basis: mention only discounts, surcharges and conditions that the quote or document itself states (for example a surcharge for monthly payment, or that the price is indicative and subject to underwriting). Do not state discount percentages that are not written in the source.
+- Do not describe a benefit as "likely" covered or not covered. If the evidence does not settle a benefit, write what the documents do say about it, then end with "not stated in the documents supplied" rather than a bare "Unclear".
 - critical_limitations: one limit per item with a short topic naming that limit (e.g. "Prescribed medicines", "Consultation visits"), detail in at most 35 words. Split a group of separate caps into separate items rather than one long list.
 
 Return ONLY valid JSON:

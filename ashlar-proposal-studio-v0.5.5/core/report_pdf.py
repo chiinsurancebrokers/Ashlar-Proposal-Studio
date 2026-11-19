@@ -20,6 +20,7 @@ from reportlab.platypus import (
 )
 
 from .claim_cost import claim_cost_view
+from .report_bars import OUTPATIENT_TOPIC, PREMIUM_TOPIC, outpatient_bars, premium_bars
 from .client_analysis import plan_display_name, premium_display, client_facing_deductible, find_plan_narrative, coverage_scope_note
 from .household import REL_GREEK
 from .report_labels import all_labels as _labels, category_label, topic_label
@@ -267,7 +268,8 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
     header = [_p(lab["benefit"], ParagraphStyle("TH", parent=Small, fontName=FONT_BOLD, textColor=WHITE))] + [_p(n, ParagraphStyle("TH2", parent=Small, fontName=FONT_BOLD, textColor=WHITE, alignment=TA_CENTER)) for n in names]
     data = [header]
     band_rows: list[int] = []
-    seen_category = None
+    seen_category, any_bars = None, False
+    BARW = min(30 * mm, (doc.width - 38 * mm) / max(len(names), 1) - 10)
     for row in matrix:
         category = str(row.get("category") or "").strip()
         if category and category != seen_category:
@@ -278,15 +280,32 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
         topic = _p(topic_label(row.get("topic"), language), ParagraphStyle("Topic", parent=Small, fontName=FONT_BOLD, textColor=INK))
         values, marks = row.get("values") or {}, row.get("marks") or {}
         is_benefit = str(row.get("category") or "") == "Benefits"
+        key = str(row.get("topic") or "").strip().casefold()
+        row_bars = {}
+        if key == PREMIUM_TOPIC:
+            row_bars = premium_bars(results, names)
+        elif key == OUTPATIENT_TOPIC:
+            row_bars = outpatient_bars(values, {n: (marks.get(n) or benefit_mark(values.get(n))).get("state") for n in names})
+        any_bars = any_bars or bool(row_bars)
         cells = []
         for n in names:
             raw = values.get(n)
             if not is_benefit:
-                cells.append(_p(raw or "Not specified", Small))
-                continue
-            # Recomputed when the stored matrix predates the marks, so an older
-            # case renders with its states rather than losing them.
-            cells.append(_marked(marks.get(n) or benefit_mark(raw), Small))
+                cell = _p(raw or "Not specified", Small)
+            else:
+                # Recomputed when the stored matrix predates the marks, so an older
+                # case renders with its states rather than losing them.
+                cell = _marked(marks.get(n) or benefit_mark(raw), Small)
+            info = row_bars.get(n)
+            if info:
+                parts = [cell]
+                if (info.get("factor") or 1) > 1:
+                    parts.append(_p(f"≈ {info.get('currency')} {info['annual']:,.2f} {lab['per_year']}", Small))
+                d = Drawing(BARW, 2.4 * mm)
+                d.add(Rect(0, 0, BARW * info["pct"] / 100, 1.8 * mm, fillColor=INK, strokeColor=None))
+                parts.append(d)
+                cell = parts
+            cells.append(cell)
         data.append([topic] + cells)
     first = 38*mm; other = (doc.width-first)/max(len(names),1)
     comp = Table(data, colWidths=[first]+[other]*len(names), repeatRows=1)
@@ -312,6 +331,8 @@ def build_pdf_bytes(*, client_analysis: dict, results: list[dict], language: str
                        (SUB_LIMIT, "mark_sub_limit"), (NOT_COVERED, "mark_not_covered")):
         safe = str(lab[key]).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         key_parts.append(f"<font color='{MARK_COLOUR[state]}'>{MARK_SYMBOL[state]}</font> {safe}")
+    if any_bars:
+        story.append(_p(lab["bars_note"], Small))
     legend = Paragraph("&nbsp;&nbsp;&nbsp;".join(key_parts), Small)
     story += [legend, Spacer(1, 2*mm), comp, PageBreak()]
 

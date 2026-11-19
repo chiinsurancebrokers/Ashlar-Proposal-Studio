@@ -34,6 +34,7 @@ from html import escape
 
 from .benefit_state import ACTION, COVERED, NOT_COVERED, SUB_LIMIT, UNKNOWN
 from .benefit_state import mark as benefit_mark
+from .claim_cost import claim_cost_view
 from .client_analysis import (
     client_facing_deductible,
     coverage_scope_note,
@@ -164,6 +165,14 @@ li{margin:0 0 6px}
 .wall.three{grid-template-columns:repeat(3,1fr)}
 .block{padding:20px 22px; border-right:1px solid var(--mortar); border-bottom:1px solid var(--mortar)}
 .block:last-child{border-right:0}
+.cost{width:100%; border-collapse:collapse; border:1px solid var(--mortar); background:var(--paper-fine); margin:0 0 16px}
+.cost th,.cost td{border:1px solid var(--mortar); padding:10px 12px; text-align:left; vertical-align:middle}
+.cost th{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; background:var(--ink); color:var(--paper-fine)}
+.cost td.num{white-space:nowrap; font-variant-numeric:tabular-nums}
+.cost td.total{font-family:var(--display); font-size:18px}
+.cost .bar{display:block; height:8px; background:var(--ink); margin-top:6px}
+.cost .bar.light{background:var(--mortar); margin-top:0}
+.cost tr{break-inside:avoid}
 .facts{width:100%; border-collapse:collapse; border:1px solid var(--mortar);
   background:var(--paper-fine); margin:0 0 20px}
 .facts th,.facts td{border:1px solid var(--mortar); padding:10px 12px; text-align:left;
@@ -505,6 +514,34 @@ def _differences(client_analysis: dict, lab: dict) -> str:
     )
 
 
+def _claim_costs(results: list[dict], lab: dict) -> str:
+    view = claim_cost_view(results, lab)
+    if not view:
+        return ""
+    rows = "".join(
+        "<tr>"
+        f"<td><b>{_e(r['name'])}</b>"
+        f"<span class='bar' style='width:{r['w_prem']}%'></span>"
+        f"<span class='bar light' style='width:{r['w_ded']}%'></span></td>"
+        f"<td class='num'>{_e(r['premium'])}</td><td class='num'>{_e(r['deductible'])}</td>"
+        f"<td class='num total'>{_e(r['total'])}</td><td>{_e(r['note'])}</td></tr>"
+        for r in view["rows"]
+    )
+    head = "".join(
+        f"<th>{_e(lab[k])}</th>"
+        for k in ("cost_col_plan", "cost_col_premium", "cost_col_deductible", "cost_col_total", "cost_col_note")
+    )
+    return (
+        "<section id='claim-cost'><div class='wrap'>"
+        f"<h2>{_e(lab['cost_title'])}</h2>"
+        f"{_p(lab['cost_intro'], 'prose')}"
+        f"<table class='cost'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
+        f"{_p(view['ranking'], 'prose')}"
+        f"{_p(lab['cost_caveat'], 'prose muted')}"
+        "</div></section>"
+    )
+
+
 def _named_option(label: str, provider, plan, *paragraphs) -> str:
     provider, plan = str(provider or "").strip(), str(plan or "").strip()
     if not provider and not plan:
@@ -635,6 +672,7 @@ def build_html(
         _plans(client_analysis, results, lab),
         _comparison(client_analysis, results, lab, language),
         _differences(client_analysis, lab),
+        _claim_costs(results, lab),
         _recommendation(client_analysis, lab),
         _next_steps(client_analysis, lab),
         _sources(source_documents, lab),
